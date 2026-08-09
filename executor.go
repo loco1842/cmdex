@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -149,7 +150,7 @@ func (e *Executor) darwinTerminals() []terminalDef {
 			asEscaped := strings.ReplaceAll(body, `\`, `\\`)
 			asEscaped = strings.ReplaceAll(asEscaped, `"`, `\"`)
 			s := fmt.Sprintf(script, asEscaped)
-			return exec.Command("osascript", "-e", s).Start()
+			return exec.CommandContext(context.Background(), "osascript", "-e", s).Start()
 		}
 	}
 
@@ -191,7 +192,7 @@ end tell`),
 	delay 0.5
 	tell application "System Events" to keystroke "%s"
 	tell application "System Events" to key code 36`, asEscaped)
-				return exec.Command("osascript", "-e", s).Start()
+				return exec.CommandContext(context.Background(), "osascript", "-e", s).Start()
 			},
 		},
 		{
@@ -202,7 +203,7 @@ end tell`),
 					args = append([]string{"--working-directory", workingDir}, args...)
 				}
 				bin := resolveDarwinBin(alacrittyBin, alacrittyBundle)
-				return exec.Command(bin, args...).Start()
+				return exec.CommandContext(context.Background(), bin, args...).Start()
 			},
 		},
 		{
@@ -213,7 +214,7 @@ end tell`),
 					args = append([]string{"--directory", workingDir}, args...)
 				}
 				bin := resolveDarwinBin(kittyBin, kittyBundle)
-				return exec.Command(bin, args...).Start()
+				return exec.CommandContext(context.Background(), bin, args...).Start()
 			},
 		},
 		{
@@ -224,13 +225,13 @@ end tell`),
 					args = append([]string{"--working-directory=" + workingDir}, args...)
 				}
 				bin := resolveDarwinBin(ghosttyBin, ghosttyBundle)
-				return exec.Command(bin, args...).Start()
+				return exec.CommandContext(context.Background(), bin, args...).Start()
 			},
 		},
 		{
 			ID: "hyper", Name: "Hyper", Paths: []string{"/Applications/Hyper.app"}, IsApp: true,
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
-				return exec.Command("open", "-a", "Hyper").Start()
+				return exec.CommandContext(context.Background(), "open", "-a", "Hyper").Start()
 			},
 		},
 	}
@@ -243,7 +244,7 @@ func (e *Executor) linuxTerminals() []terminalDef {
 			if workingDir != "" && dirFlag != nil {
 				args = append(dirFlag(workingDir), args...)
 			}
-			return exec.Command(bin, args...).Start()
+			return exec.CommandContext(context.Background(), bin, args...).Start()
 		}
 	}
 
@@ -299,7 +300,8 @@ func (e *Executor) linuxTerminals() []terminalDef {
 					body = fmt.Sprintf("cd %s && %s", shellQuoteDir(workingDir), body)
 				}
 				//nolint:gosec // G204: shell/body are local executor fields and user-authored script content by design
-				return exec.Command("xterm", "-e", ex.shell, "-c", body+"; exec "+ex.shell).Start()
+				return exec.CommandContext(context.Background(), "xterm", "-e", ex.shell, "-c", body+"; exec "+ex.shell).
+					Start()
 			}},
 	}
 }
@@ -318,7 +320,7 @@ func (e *Executor) windowsTerminals() []terminalDef {
 				if workingDir != "" {
 					args = append([]string{"-d", workingDir}, args...)
 				}
-				return exec.Command("wt", args...).Start()
+				return exec.CommandContext(context.Background(), "wt", args...).Start()
 			}},
 		{ID: "cmd", Name: "Command Prompt", Paths: []string{"cmd"},
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
@@ -326,7 +328,7 @@ func (e *Executor) windowsTerminals() []terminalDef {
 				if workingDir != "" {
 					cmdBody = fmt.Sprintf("cd /d %s && %s", escapeCmdExe(workingDir), cmdBody)
 				}
-				return exec.Command("cmd", "/c", "start", "cmd", "/k", cmdBody).Start()
+				return exec.CommandContext(context.Background(), "cmd", "/c", "start", "cmd", "/k", cmdBody).Start()
 			}},
 		{ID: "pwsh", Name: "PowerShell", Paths: []string{"pwsh", "powershell"},
 			LaunchFn: func(_ *Executor, body string, workingDir string) error {
@@ -341,7 +343,7 @@ func (e *Executor) windowsTerminals() []terminalDef {
 						body,
 					)
 				}
-				return exec.Command(bin, "-NoExit", "-Command", body).Start()
+				return exec.CommandContext(context.Background(), bin, "-NoExit", "-Command", body).Start()
 			}},
 	}
 }

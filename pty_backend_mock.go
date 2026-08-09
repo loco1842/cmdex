@@ -10,6 +10,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -25,7 +26,7 @@ type mockPtyBackend struct{}
 // (the test does not need a long-lived shell to validate the orchestration
 // path).
 func (mockPtyBackend) Start(shellPath, shellFlag string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
-	cmd := exec.Command("sleep", "0.05")
+	cmd := exec.CommandContext(context.Background(), "sleep", "0.05")
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}

@@ -14,7 +14,10 @@ func testCleanup(t *testing.T, dbConn *DB, catID, cmdID string) {
 	dbConn.conn.Exec(`DELETE FROM categories WHERE id = ?`, catID)
 }
 
-func testDBCreateCommand(t *testing.T, catID, cmdID, categoryName, cmdTitle, scriptContent, workingDirJSON string) (*DB, func()) {
+func testDBCreateCommand(
+	t *testing.T,
+	catID, cmdID, categoryName, cmdTitle, scriptContent, workingDirJSON string,
+) (*DB, func()) {
 	t.Helper()
 
 	initDB, err := NewDB()
@@ -24,7 +27,11 @@ func testDBCreateCommand(t *testing.T, catID, cmdID, categoryName, cmdTitle, scr
 
 	testCleanup(t, initDB, catID, cmdID)
 
-	_, err = initDB.conn.Exec(`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`, catID, categoryName)
+	_, err = initDB.conn.Exec(
+		`INSERT INTO categories (id, name, icon, color) VALUES (?, ?, '', '')`,
+		catID,
+		categoryName,
+	)
 	if err != nil {
 		initDB.Close()
 		t.Fatalf("insert category: %v", err)
@@ -32,7 +39,11 @@ func testDBCreateCommand(t *testing.T, catID, cmdID, categoryName, cmdTitle, scr
 
 	_, err = initDB.conn.Exec(
 		`INSERT INTO commands (id, category_id, title, script_content, working_dir, position) VALUES (?, ?, ?, ?, ?, 0)`,
-		cmdID, catID, cmdTitle, GenerateScript(scriptContent), workingDirJSON,
+		cmdID,
+		catID,
+		cmdTitle,
+		GenerateScript(scriptContent),
+		workingDirJSON,
 	)
 	if err != nil {
 		initDB.Close()
@@ -75,7 +86,15 @@ func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 
 	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
-	_, cleanup := testDBCreateCommand(t, "test-cat-wd-18", "test-cmd-wd-18", "TestWD", "Test Cmd WD", "echo hello", workingDirJSON)
+	_, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-wd-18",
+		"test-cmd-wd-18",
+		"TestWD",
+		"Test Cmd WD",
+		"echo hello",
+		workingDirJSON,
+	)
 	defer cleanup()
 
 	svc := &ExecutionService{}
@@ -106,7 +125,15 @@ func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 		_ = initDB.SetSettings(settings)
 	}
 
-	_, cleanup := testDBCreateCommand(t, "test-cat-nowd-18", "test-cmd-nowd-18", "TestNoWD", "Test Cmd NoWD", "echo hello", `{}`)
+	_, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-nowd-18",
+		"test-cmd-nowd-18",
+		"TestNoWD",
+		"Test Cmd NoWD",
+		"echo hello",
+		`{}`,
+	)
 	defer cleanup()
 
 	svc := &ExecutionService{}
@@ -126,7 +153,15 @@ func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 
 	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
-	_, cleanup := testDBCreateCommand(t, "test-cat-ml-18", "test-cmd-ml-18", "TestML", "Test Cmd ML", "line1\nline2", workingDirJSON)
+	_, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-ml-18",
+		"test-cmd-ml-18",
+		"TestML",
+		"Test Cmd ML",
+		"line1\nline2",
+		workingDirJSON,
+	)
 	defer cleanup()
 
 	svc := &ExecutionService{}
@@ -169,7 +204,15 @@ func TestRunCommand_GetCommandError(t *testing.T) {
 func TestRunCommand_NoHistoryPersistence(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 
-	initDB, cleanup := testDBCreateCommand(t, "test-cat-nohist-18", "test-cmd-nohist-18", "TestNoHist", "Test Cmd NoHist", "echo hello", `{}`)
+	initDB, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-nohist-18",
+		"test-cmd-nohist-18",
+		"TestNoHist",
+		"Test Cmd NoHist",
+		"echo hello",
+		`{}`,
+	)
 	defer cleanup()
 
 	_ = initDB.ClearExecutions()
@@ -191,7 +234,15 @@ func TestRunCommand_NilTerminalSvc(t *testing.T) {
 	terminalSvc = nil
 	defer func() { terminalSvc = prevTerminalSvc }()
 
-	_, cleanup := testDBCreateCommand(t, "test-cat-nilsvc-24", "test-cmd-nilsvc-24", "TestNilSvc", "Test Cmd NilSvc", "echo hi", `{}`)
+	_, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-nilsvc-24",
+		"test-cmd-nilsvc-24",
+		"TestNilSvc",
+		"Test Cmd NilSvc",
+		"echo hi",
+		`{}`,
+	)
 	defer cleanup()
 
 	svc := &ExecutionService{}
@@ -216,7 +267,15 @@ func TestRunCommand_NoActiveSession(t *testing.T) {
 	terminalSvc.activeSessionID = ""
 	terminalSvc.mu.Unlock()
 
-	_, cleanup := testDBCreateCommand(t, "test-cat-noact-24", "test-cmd-noact-24", "TestNoAct", "Test Cmd NoAct", "echo hi", `{}`)
+	_, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-noact-24",
+		"test-cmd-noact-24",
+		"TestNoAct",
+		"Test Cmd NoAct",
+		"echo hi",
+		`{}`,
+	)
 	defer cleanup()
 
 	svc := &ExecutionService{}
@@ -236,7 +295,15 @@ func TestRunCommand_ExecutesOnActiveSession(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 
 	// testWithTerminalSvc creates a default session and makes it active.
-	_, cleanup := testDBCreateCommand(t, "test-cat-exec-24", "test-cmd-exec-24", "TestExec", "Test Cmd Exec", "true", `{}`)
+	_, cleanup := testDBCreateCommand(
+		t,
+		"test-cat-exec-24",
+		"test-cmd-exec-24",
+		"TestExec",
+		"Test Cmd Exec",
+		"true",
+		`{}`,
+	)
 	defer cleanup()
 
 	svc := &ExecutionService{}

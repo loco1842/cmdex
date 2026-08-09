@@ -511,3 +511,6 @@ linters:
           - gosec
           - noctx
           - wrapcheck
+      - path: 'migrations/'
+        text: 'Magic number: \d+, in <assign> detected'
+        linters: [ mnd ]

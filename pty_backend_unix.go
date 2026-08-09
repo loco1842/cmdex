@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,7 +61,7 @@ func (h osFileHandle) Close() error                { return h.f.Close() }
 func ptyStart(shellPath, shellFlag string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
 	args := []string{shellFlag}
 	args = append(args, extraArgs...)
-	cmd := exec.Command(shellPath, args...)
+	cmd := exec.CommandContext(context.Background(), shellPath, args...)
 	cmd.Env = os.Environ()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})

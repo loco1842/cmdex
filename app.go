@@ -99,9 +99,14 @@ func (a *App) createSettingsWindowLocked() {
 	}
 
 	windowOptions := application.WebviewWindowOptions{
-		Title:               "Settings",
-		UseApplicationMenu:  false,
-		BackgroundColour:    application.NewRGBA(settingsWindowBgR, settingsWindowBgG, settingsWindowBgB, settingsWindowBgA),
+		Title:              "Settings",
+		UseApplicationMenu: false,
+		BackgroundColour: application.NewRGBA(
+			settingsWindowBgR,
+			settingsWindowBgG,
+			settingsWindowBgB,
+			settingsWindowBgA,
+		),
 		HideOnEscape:        true,
 		DisableResize:       true,
 		Width:               settingsWindowWidth,

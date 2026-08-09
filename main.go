@@ -11,10 +11,10 @@ import (
 var assets embed.FS
 
 const (
-	mainWindowWidth     = 1200
-	mainWindowHeight    = 800
-	mainWindowMinWidth  = 900
-	mainWindowMinHeight = 600
+	mainWindowWidth                            = 1200
+	mainWindowHeight                           = 800
+	mainWindowMinWidth                         = 900
+	mainWindowMinHeight                        = 600
 	windowBgR, windowBgG, windowBgB, windowBgA = 15, 15, 20, 255
 )
 
