@@ -145,12 +145,12 @@ Users can reset all application data from the **Danger Zone** section in Setting
 
 ## 7. Environment Variables
 
-Cmdex uses a small set of environment variables for build-time and runtime configuration. These are loaded from `.env` files (at the project root and `frontend/` subdirectory) during development and build.
+Cmdex uses a small set of environment variables for build-time and runtime configuration. `.env` files (at the project root and `frontend/` subdirectory) are optional, loaded via each Taskfile's `dotenv:` directive — every variable below has a built-in default, so you don't need to create these files for standard development.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `APP_NAME` | No | `cmdex` | Binary output name. Used by `wails.json` (`outputfilename`) and the build `Taskfile.yml` to name the compiled executable. |
-| `VITE_PORT` | No | `9245` | Port for the Vite development server. Set in both the root `.env` and `frontend/.env`. The `Taskfile.yml` dev task passes it via `--port {{.VITE_PORT}} --strictPort`. |
+| `APP_NAME` | N/A | `cmdex` | Hardcoded in `Taskfile.yml` — not environment-configurable. Binary output name. |
+| `VITE_PORT` | No | `9245` | Port for the Vite development server. The default is baked into `Taskfile.yml`/`build/Taskfile.yml` as a shell fallback (`${VITE_PORT:-9245}`) — override via `.env`/`frontend/.env`, or ad hoc: `VITE_PORT=9246 task dev`. `frontend/vite.config.ts`'s `server.host` is pinned to `127.0.0.1` (not the ambiguous `localhost`) so Vite's bind address always matches the IPv4 address Wails' asset-server proxy dials. |
 | `PRODUCTION` | No | (varies) | Set automatically by the build task (`build/Taskfile.yml`) to `true` for production builds or `false` for dev builds. Controls the Vite build mode. Not user-configurable. |
 | `SHELL` | No | `/bin/sh` | Read at runtime on macOS/Linux to select the shell used for script execution (see executor in `executor.go`). If unset, `/bin/sh` is used. On Windows, `cmd` is always used regardless of this variable. |
 
@@ -319,7 +319,7 @@ Cmdex does not use separate `.env.development`, `.env.production`, or `.env.test
 
 ### Development vs Production
 
-| Aspect | Development (`wails dev`) | Production (`wails build`) |
+| Aspect | Development (`wails3 dev`) | Production (`wails3 build`) |
 |--------|--------------------------|---------------------------|
 | Frontend build | Vite dev server on `VITE_PORT` (default `9245`) | Static `dist/` output served from embedded filesystem |
 | Go build flags | `DEV=true` injected by `build/config.yml` dev executes | No `DEV` flag |

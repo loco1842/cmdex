@@ -17,6 +17,15 @@ var (
 	terminalSvc *TerminalService
 )
 
+const (
+	settingsWindowWidth  = 640
+	settingsWindowHeight = 520
+	settingsWindowBgR    = 15
+	settingsWindowBgG    = 15
+	settingsWindowBgB    = 20
+	settingsWindowBgA    = 255
+)
+
 // App handles application lifecycle and settings window management.
 type App struct {
 	settingsWindowMu sync.Mutex
@@ -39,7 +48,7 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 // ServiceShutdown closes the database connection if non-nil.
 func (a *App) ServiceShutdown() error {
 	if db != nil {
-		db.Close()
+		_ = db.Close()
 	}
 	return nil
 }
@@ -92,11 +101,11 @@ func (a *App) createSettingsWindowLocked() {
 	windowOptions := application.WebviewWindowOptions{
 		Title:               "Settings",
 		UseApplicationMenu:  false,
-		BackgroundColour:    application.NewRGBA(15, 15, 20, 255),
+		BackgroundColour:    application.NewRGBA(settingsWindowBgR, settingsWindowBgG, settingsWindowBgB, settingsWindowBgA),
 		HideOnEscape:        true,
 		DisableResize:       true,
-		Width:               640,
-		Height:              520,
+		Width:               settingsWindowWidth,
+		Height:              settingsWindowHeight,
 		MinimiseButtonState: application.ButtonDisabled,
 		MaximiseButtonState: application.ButtonDisabled,
 		URL:                 "/?window=settings",

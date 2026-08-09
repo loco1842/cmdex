@@ -103,6 +103,8 @@ type Command struct {
 	UpdatedAt     time.Time            `json:"updatedAt"`
 }
 
+const displayTitleMaxLen = 50
+
 // DisplayTitle returns the title if present, otherwise extracts first 50 chars from script
 func (c Command) DisplayTitle() string {
 	if c.Title.Valid && c.Title.String != "" {
@@ -111,8 +113,8 @@ func (c Command) DisplayTitle() string {
 	body := ParseScriptBody(c.ScriptContent)
 	body = strings.ReplaceAll(body, "\n", " ")
 	body = strings.TrimSpace(body)
-	if len(body) > 50 {
-		return body[:50] + "..."
+	if len(body) > displayTitleMaxLen {
+		return body[:displayTitleMaxLen] + "..."
 	}
 	if body == "" {
 		return "Untitled"
@@ -151,20 +153,18 @@ type TerminalInfo struct {
 
 // AppSettings stores user preferences
 type AppSettings struct {
-	Locale         string `json:"locale"`
-	Terminal       string `json:"terminal"`               // terminal ID; empty = auto-detect
-	Theme          string `json:"theme"`                  // active theme ID
-	LastDarkTheme  string `json:"lastDarkTheme"`          // last used dark theme
-	LastLightTheme string `json:"lastLightTheme"`         // last used light theme
-	CustomThemes   string `json:"customThemes"`           // JSON-encoded []CustomTheme; empty string = "[]"
-	UIFont         string `json:"uiFont"`                 // UI sans-serif font
-	MonoFont       string `json:"monoFont"`               // monospace font for editor
-	Density           string     `json:"density"`                // layout density: compact | comfortable | spacious
+	Locale            string     `json:"locale"`
+	Terminal          string     `json:"terminal"`                    // terminal ID; empty = auto-detect
+	Theme             string     `json:"theme"`                       // active theme ID
+	LastDarkTheme     string     `json:"lastDarkTheme"`               // last used dark theme
+	LastLightTheme    string     `json:"lastLightTheme"`              // last used light theme
+	CustomThemes      string     `json:"customThemes"`                // JSON-encoded []CustomTheme; empty string = "[]"
+	UIFont            string     `json:"uiFont"`                      // UI sans-serif font
+	MonoFont          string     `json:"monoFont"`                    // monospace font for editor
+	Density           string     `json:"density"`                     // layout density: compact | comfortable | spacious
 	DefaultWorkingDir *OSPathMap `json:"defaultWorkingDir,omitempty"` // nil = leave unchanged; non-nil empty map = clear.
-	WindowX           *int      `json:"windowX,omitempty"`      // settings window X position, nil = unset (center on open)
-	WindowY        *int   `json:"windowY,omitempty"`      // settings window Y position
-	WindowWidth    *int   `json:"windowWidth,omitempty"`  // settings window width, min 480
-	WindowHeight   *int   `json:"windowHeight,omitempty"` // settings window height, min 400
+	WindowX           *int       `json:"windowX,omitempty"`           // settings window X position, nil = unset (center on open)
+	WindowY           *int       `json:"windowY,omitempty"`           // settings window Y position
+	WindowWidth       *int       `json:"windowWidth,omitempty"`       // settings window width, min 480
+	WindowHeight      *int       `json:"windowHeight,omitempty"`      // settings window height, min 400
 }
-
-

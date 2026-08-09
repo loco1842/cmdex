@@ -10,7 +10,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss(), wails("./bindings")],
     server: {
+      host: "127.0.0.1",
       port: parseInt(env.VITE_PORT) || 9245,
+      strictPort: true,
     },
     resolve: {
       alias: {

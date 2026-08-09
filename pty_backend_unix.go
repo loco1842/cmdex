@@ -13,6 +13,8 @@ import (
 )
 
 // newPtyBackend returns the creack/pty-backed ptyBackend for darwin/linux.
+const ptyKillTimeout = 2 * time.Second
+
 func newPtyBackend() ptyBackend {
 	return creackPtyBackend{}
 }
@@ -95,7 +97,7 @@ func killProcessGroup(cmd *exec.Cmd) error {
 	select {
 	case <-done:
 		return nil
-	case <-time.After(2 * time.Second):
+	case <-time.After(ptyKillTimeout):
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		<-done
 		return nil

@@ -12,7 +12,7 @@ This guide covers how to set up, build, and develop the **Cmdex** application lo
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | `>= 1.25.0` | Backend services and Wails runtime |
+| Go | `>= 1.26.0` | Backend services and Wails runtime |
 | Node.js | `>= 20.19.0 || >=22.13.0 || >=24` | Frontend build tooling (Vite, TypeScript) |
 | pnpm | latest | Frontend package manager |
 | Wails CLI | `v3` | Desktop app framework and binding generator |
@@ -226,7 +226,8 @@ Main window dimensions, title, background color, and macOS-specific options are 
 
 ### Go
 
-- Standard Go formatting (`gofmt`). Run `go fmt ./...` before committing.
+- Standard Go formatting. Run `make fmt` (`golangci-lint fmt`) before committing; it rewrites files in place using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`).
+- `make lint` (`golangci-lint run || true`, using `.golangci.yml`) reports style/correctness issues — same config CI runs (advisory there too, via `continue-on-error: true`). The `|| true` keeps `make lint` non-blocking, since golangci-lint exits non-zero on findings. Not wired into `make check`.
 - Services are named `XxxService` with exported methods in PascalCase.
 - Errors are wrapped with `fmt.Errorf("...: %w", err)`.
 - Database access is centralized in `db.go`; services call `db.*` rather than issuing SQL directly.
@@ -264,7 +265,10 @@ The project uses Tailwind v4 with the new `@tailwindcss/vite` plugin. Styles are
 | `make build` | Alias for `wails3 build` |
 | `make generate` | Alias for `wails3 generate bindings` |
 | `make check` | Compile Go + type-check TypeScript |
-| `make clean` | Remove build artifacts and `frontend/dist` |
+| `make fmt` | Rewrite Go files with `golangci-lint fmt` (`goimports` + `golines`) |
+| `make lint` | Run `golangci-lint run` (advisory, non-blocking — same config CI uses) |
+| `make test` | Run the frontend Playwright e2e suite |
+| `make clean` | Remove `bin/` and `frontend/dist`, then restore the tracked `frontend/dist/.gitkeep` placeholder |
 
 ### Taskfile (Cross-platform builds)
 
@@ -274,6 +278,17 @@ The project uses Tailwind v4 with the new `@tailwindcss/vite` plugin. Styles are
 | `task build` | Platform-specific production build |
 | `task package` | Package the app for distribution |
 | `task run` | Run the compiled binary |
+
+### Renaming the App
+
+The binary/package name (`cmdex`) exists as independent, manually-synced copies in four places: `Taskfile.yml` (`APP_NAME`), `build/darwin/Info.plist` (`CFBundleExecutable`), `build/linux/nfpm/nfpm.yaml` (binary path), and `build/windows/nsis/wails_tools.nsh` (`INFO_PROJECTNAME`). Editing `Taskfile.yml`'s `APP_NAME` alone will silently break Linux/Windows packaging and the macOS `.app` bundle launch, since those three files won't match the new binary name.
+
+To rename the app, do all of this together, in one commit:
+
+1. Update `APP_NAME` in `Taskfile.yml`.
+2. Update `info.productName` (and `info.productIdentifier` if needed) in `build/config.yml`.
+3. Regenerate the platform-specific files from the new name: `task common:update:build-assets`.
+4. Verify the regenerated `Info.plist`, `nfpm.yaml`, and `wails_tools.nsh` all reflect the new name, then commit everything together.
 
 ### Frontend-only Checks
 

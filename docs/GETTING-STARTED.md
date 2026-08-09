@@ -8,10 +8,10 @@ This guide will walk you through setting up the Cmdex project for local developm
 
 Before you begin, make sure you have the following installed:
 
-- **Go** `>= 1.25.0`
+- **Go** `>= 1.26.0`
 - **Node.js** `>= 25`
 - **pnpm** (required for frontend dependencies)
-- **Wails v3 CLI** (`v3.0.0-alpha.74`)
+- **Wails v3 CLI** (`v3.0.0-beta.5`)
 - **Task** (optional, used by build scripts — install from [taskfile.dev](https://taskfile.dev))
 
 ### Platform-specific dependencies
@@ -39,7 +39,7 @@ Before you begin, make sure you have the following installed:
 
 2. **Install the Wails v3 CLI**
    ```bash
-   go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.74
+   go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.5
    ```
 
 3. **Install frontend dependencies**
@@ -95,37 +95,37 @@ No additional configuration is required to run the app locally. On first launch,
 
 All data is stored locally — no accounts, cloud services, or API keys are needed.
 
-The project includes pre-configured environment files (`.env` and `frontend/.env`) that set the application name and development server port. You should not need to modify these for standard development.
+The project includes pre-configured environment files (`.env` and `frontend/.env`) that set the application name and development server port — these are optional; `task dev`/`make dev` fall back to sane built-in defaults (port `9245`) even without them. You should not need to create or modify these for standard development.
 
 ## Common setup issues
 
 ### Port conflict (VITE_PORT=9245)
 
-The Vite dev server runs on port **9245** by default (configured in `.env` and `frontend/.env`). If that port is already in use, `wails3 dev` will fail and `task dev` will exit with an error because the frontend dev server uses `--strictPort`. To resolve this:
+The Vite dev server runs on port **9245** by default (baked into `Taskfile.yml`/`build/Taskfile.yml` as a shell fallback: `${VITE_PORT:-9245}`), overridable via `VITE_PORT` in `.env`/`frontend/.env` or the shell environment. If that port is already in use, `wails3 dev` will fail and `task dev` will exit with an error because the frontend dev server uses `--strictPort`. To resolve this:
 
 - Free up port 9245, or
-- Change `VITE_PORT` in both `.env` and `frontend/.env` to an available port
+- Set `VITE_PORT` to an available port — either in `.env`/`frontend/.env`, or ad hoc: `VITE_PORT=9246 task dev`
 
 ### Wails CLI version mismatch
 
-This project pins Wails to **`v3.0.0-alpha.74`** (as specified in `go.mod`). Installing a different version of `wails3` can cause binding generation failures or unexpected behavior at runtime. Verify your installed version:
+This project pins Wails to **`v3.0.0-beta.5`** (as specified in `go.mod`). Installing a different version of `wails3` can cause binding generation failures or unexpected behavior at runtime. Verify your installed version:
 
 ```bash
 wails3 version
 ```
 
-If it does not match `v3.0.0-alpha.74`, reinstall the exact version:
+If it does not match `v3.0.0-beta.5`, reinstall the exact version:
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.74
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.5
 ```
 
 ### Go toolchain version
 
-The `go.mod` file declares `go 1.25.0`. An older Go toolchain may produce compilation errors or Go module resolution failures. Verify your Go version matches:
+The `go.mod` file declares `go 1.26.0`. An older Go toolchain may produce compilation errors or Go module resolution failures. Verify your Go version matches:
 
 ```bash
-go version  # should show go1.25.x or newer
+go version  # should show go1.26.x or newer
 ```
 
 ### Wails bindings not generated

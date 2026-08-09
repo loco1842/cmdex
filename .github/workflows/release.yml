@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  WAILS_VERSION: v3.0.0-alpha.74
+  WAILS_VERSION: v3.0.0-beta.5
   NODE_VERSION: '24'
   PNPM_VERSION: '11'
 
@@ -35,7 +35,7 @@ jobs:
             task: package
           - os: macos-latest
             artifact: cmdex-darwin-universal
-            task: package:universal
+            task: package:dmg:universal
           - os: windows-latest
             artifact: cmdex-windows-amd64
             task: package
@@ -101,7 +101,7 @@ jobs:
           mkdir -p /tmp/apt-cache
           sudo cp -r /tmp/apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev
           sudo cp /var/cache/apt/archives/*.deb /tmp/apt-cache/ 2>/dev/null || true
           sudo chmod -R a+r /tmp/apt-cache
 
@@ -145,14 +145,6 @@ jobs:
       - name: Add Go bin to PATH
         shell: bash
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-      - name: Cache frontend build outputs
-        uses: actions/cache@v4
-        with:
-          path: |
-            frontend/dist
-            frontend/bindings
-          key: frontend-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml', 'frontend/src/**', 'frontend/index.html', 'frontend/vite.config.*', 'frontend/tsconfig*.json', 'frontend/tailwind.config.*', '**/*.go', 'go.mod', 'go.sum') }}
 
       - name: Package release build
         if: startsWith(github.ref, 'refs/tags/')

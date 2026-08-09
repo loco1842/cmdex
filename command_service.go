@@ -94,7 +94,12 @@ func (s *CommandService) GetCommandsByCategory(categoryID string) []Command {
 }
 
 // CreateCommand creates a new Command with the given fields and returns the created Command or an error.
-func (s *CommandService) CreateCommand(title, description, scriptBody, categoryID string, tags []string, variables []VariableDefinition, workingDir OSPathMap) (Command, error) {
+func (s *CommandService) CreateCommand(
+	title, description, scriptBody, categoryID string,
+	tags []string,
+	variables []VariableDefinition,
+	workingDir OSPathMap,
+) (Command, error) {
 	if tags == nil {
 		tags = []string{}
 	}
@@ -129,7 +134,12 @@ func (s *CommandService) CreateCommand(title, description, scriptBody, categoryI
 }
 
 // UpdateCommand updates a Command's fields by id and returns the updated Command or an error.
-func (s *CommandService) UpdateCommand(id, title, description, scriptBody, categoryID string, tags []string, variables []VariableDefinition, workingDir OSPathMap) (Command, error) {
+func (s *CommandService) UpdateCommand(
+	id, title, description, scriptBody, categoryID string,
+	tags []string,
+	variables []VariableDefinition,
+	workingDir OSPathMap,
+) (Command, error) {
 	if tags == nil {
 		tags = []string{}
 	}
@@ -245,7 +255,12 @@ func (s *CommandService) SavePreset(commandID string, name string, values map[st
 }
 
 // UpdatePreset updates an existing VariablePreset by presetID and returns it or an error.
-func (s *CommandService) UpdatePreset(commandID string, presetID string, name string, values map[string]string) (VariablePreset, error) {
+func (s *CommandService) UpdatePreset(
+	commandID string,
+	presetID string,
+	name string,
+	values map[string]string,
+) (VariablePreset, error) {
 	presets, err := db.GetPresets(commandID)
 	if err != nil {
 		return VariablePreset{}, fmt.Errorf("get presets for validation: %w", err)

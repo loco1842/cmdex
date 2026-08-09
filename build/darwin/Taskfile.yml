@@ -4,11 +4,6 @@ includes:
   common: ../Taskfile.yml
 
 vars:
-  # Signing configuration - edit these values for your project
-  # SIGN_IDENTITY: "Developer ID Application: Your Company (TEAMID)"
-  # KEYCHAIN_PROFILE: "my-notarize-profile"
-  # ENTITLEMENTS: "build/darwin/entitlements.plist"
-
   # Docker image for cross-compilation (used when building on non-macOS)
   CROSS_IMAGE: wails-cross
 
@@ -22,6 +17,8 @@ tasks:
           DEV: '{{.DEV}}'
           OUTPUT: '{{.OUTPUT}}'
           EXTRA_TAGS: '{{.EXTRA_TAGS}}'
+          OBFUSCATED: '{{.OBFUSCATED}}'
+          GARBLE_ARGS: '{{.GARBLE_ARGS}}'
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
@@ -35,28 +32,36 @@ tasks:
         vars:
           BUILD_FLAGS:
             ref: .BUILD_FLAGS
+          OBFUSCATED:
+            ref: .OBFUSCATED
           DEV:
             ref: .DEV
       - task: common:generate:icons
+    preconditions:
+      - sh: '{{if eq .OBFUSCATED "true"}}command -v garble >/dev/null 2>&1{{else}}true{{end}}'
+        msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0 (requires Go 1.24+). See https://github.com/burrowers/garble/releases for version/toolchain compatibility."
     cmds:
-      - go build {{.BUILD_FLAGS}} -o {{.OUTPUT}}
+      - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.OUTPUT}}"'
     vars:
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
     env:
       GOOS: darwin
       CGO_ENABLED: 1
       GOARCH: '{{.ARCH | default ARCH}}'
-      CGO_CFLAGS: "-mmacosx-version-min=10.15"
-      CGO_LDFLAGS: "-mmacosx-version-min=10.15"
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
+      CGO_CFLAGS: "-mmacosx-version-min=12.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=12.0"
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
 
   build:docker:
     summary: Cross-compiles for macOS using Docker (for Linux/Windows hosts)
     internal: true
     deps:
       - task: common:build:frontend
+        vars:
+          OBFUSCATED:
+            ref: .OBFUSCATED
       - task: common:generate:icons
     preconditions:
       - sh: docker info > /dev/null 2>&1
@@ -66,69 +71,33 @@ tasks:
           Docker image '{{.CROSS_IMAGE}}' not found.
           Build it first: wails3 task setup:docker
     cmds:
-      - docker run --rm -v "{{.ROOT_DIR}}:/app" {{.GO_CACHE_MOUNT}} {{.REPLACE_MOUNTS}} -e APP_NAME="{{.APP_NAME}}" {{if .EXTRA_TAGS}}-e EXTRA_TAGS="{{.EXTRA_TAGS}}"{{end}} {{.CROSS_IMAGE}} darwin {{.DOCKER_ARCH}}
-      - docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) /app/bin
+      - docker run --rm -v "{{.ROOT_DIR}}:/app" {{.DOCKER_MOUNTS}} -e APP_NAME="{{.APP_NAME}}" {{if .EXTRA_TAGS}}-e EXTRA_TAGS="{{.EXTRA_TAGS}}"{{end}} {{if eq .OBFUSCATED "true"}}-e OBFUSCATED=true{{end}} {{if .GARBLE_ARGS}}-e GARBLE_ARGS="{{.GARBLE_ARGS}}"{{end}} {{.CROSS_IMAGE}} darwin {{.DOCKER_ARCH}}
+      - cmd: docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) /app/bin
+        platforms: [linux, darwin]
       - mkdir -p {{.BIN_DIR}}
       - mv "bin/{{.APP_NAME}}-darwin-{{.DOCKER_ARCH}}" "{{.OUTPUT}}"
     vars:
       DOCKER_ARCH: '{{if eq .ARCH "arm64"}}arm64{{else if eq .ARCH "amd64"}}amd64{{else}}arm64{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
-      # Mount Go module cache for faster builds
-      GO_CACHE_MOUNT:
-        sh: 'echo "-v ${GOPATH:-$HOME/go}/pkg/mod:/go/pkg/mod"'
-      # Extract replace directives from go.mod and create -v mounts for each
-      # Handles both relative (=> ../) and absolute (=> /) paths
-      REPLACE_MOUNTS:
-        sh: |
-          go mod edit -json 2>/dev/null | python3 -c "
-          import json, sys, os
-          data = json.load(sys.stdin)
-          for r in data.get('Replace', []):
-              p = r.get('New', {}).get('Path', '')
-              if not p: continue
-              if not p.startswith('/'):
-                  p = os.path.abspath(p)
-              if os.path.isdir(p):
-                  print(f'-v {p}:{p}:ro')
-          " | tr '\n' ' '
+      # Generate Docker volume mounts: Go module cache + go.mod replace directives
+      # Uses wails3 tool docker-mounts for cross-platform compatibility (Windows/Linux/macOS)
+      DOCKER_MOUNTS:
+        sh: 'wails3 tool docker-mounts'
 
   build:universal:
     summary: Builds darwin universal binary (arm64 + amd64)
     deps:
-      - task: common:build:frontend
-        vars:
-          BUILD_FLAGS: '-tags production -trimpath -buildvcs=false -ldflags="-w -s"'
-      - task: common:generate:icons
-    cmds:
-      - task: build:native:arch
+      - task: build
         vars:
           ARCH: amd64
           OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-amd64"
-      - task: build:native:arch
+      - task: build
         vars:
           ARCH: arm64
           OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
-      - task: '{{if eq OS "darwin"}}build:universal:lipo:native{{else}}build:universal:lipo:go{{end}}'
-
-  build:native:arch:
-    summary: Builds a single architecture binary (skips frontend + bindings)
-    internal: true
-    deps:
-      - task: common:go:mod:tidy
     cmds:
-      - go build {{.BUILD_FLAGS}} -o {{.OUTPUT}}
-    vars:
-      BUILD_FLAGS: '-tags production -trimpath -buildvcs=false -ldflags="-w -s"'
-      DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
-      OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
-    env:
-      GOOS: darwin
-      CGO_ENABLED: 1
-      GOARCH: '{{.ARCH | default ARCH}}'
-      CGO_CFLAGS: "-mmacosx-version-min=10.15"
-      CGO_LDFLAGS: "-mmacosx-version-min=10.15"
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
+      - task: '{{if eq OS "darwin"}}build:universal:lipo:native{{else}}build:universal:lipo:go{{end}}'
 
   build:universal:lipo:native:
     summary: Creates universal binary using native lipo (macOS)
@@ -145,20 +114,52 @@ tasks:
       - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
 
   package:
-    summary: Packages the application into a `.app` bundle and `.dmg` disk image
+    summary: Packages the application into a `.app` bundle
     deps:
       - task: build
     cmds:
       - task: create:app:bundle
-      - task: create:dmg
 
   package:universal:
-    summary: Packages darwin universal binary (arm64 + amd64) into a `.dmg` disk image
+    summary: Packages darwin universal binary (arm64 + amd64)
     deps:
       - task: build:universal
     cmds:
       - task: create:app:bundle
+
+  package:dmg:
+    summary: Packages the application into a styled `.dmg`
+    deps:
+      - task: package
+    cmds:
       - task: create:dmg
+
+  package:dmg:universal:
+    summary: Packages a darwin universal binary (arm64 + amd64) into a styled `.dmg`
+    deps:
+      - task: package:universal
+    cmds:
+      - task: create:dmg
+
+  create:dmg:
+    summary: Creates a configurable `.dmg` from the `.app` bundle
+    platforms: [darwin]
+    cmds:
+      - >-
+        wails3 tool package --format dmg --name "{{.APP_NAME}}" --out "{{.BIN_DIR}}"
+        --background "{{.DMG_BACKGROUND}}"
+        --volume-icon "{{.DMG_VOLUME_ICON}}"
+        --file-icon "{{.DMG_FILE_ICON}}"
+        --window-width "{{.DMG_WINDOW_WIDTH}}"
+        --window-height "{{.DMG_WINDOW_HEIGHT}}"
+        {{if .DMG_FILES}}--files "{{.DMG_FILES}}"{{end}}
+    vars:
+      DMG_BACKGROUND: '{{.DMG_BACKGROUND | default "build/darwin/dmg-background.png"}}'
+      DMG_VOLUME_ICON: '{{.DMG_VOLUME_ICON | default "build/darwin/icons.icns"}}'
+      DMG_FILE_ICON: '{{.DMG_FILE_ICON | default "build/darwin/dmg-file-icon.icns"}}'
+      DMG_WINDOW_WIDTH: '{{.DMG_WINDOW_WIDTH | default "540"}}'
+      DMG_WINDOW_HEIGHT: '{{.DMG_WINDOW_HEIGHT | default "380"}}'
+      DMG_FILES: '{{.DMG_FILES | default ""}}'
 
 
   create:app:bundle:
@@ -175,20 +176,6 @@ tasks:
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
-  create:dmg:
-    summary: Creates a `.dmg` disk image from the `.app` bundle
-    preconditions:
-      - sh: test "$(uname)" = "Darwin"
-      - sh: test -d "{{.BIN_DIR}}/{{.APP_NAME}}.app"
-        msg: "Run create:app:bundle first"
-    cmds:
-      - rm -rf /tmp/{{.APP_NAME}}-dmg-staging
-      - mkdir -p /tmp/{{.APP_NAME}}-dmg-staging
-      - cp -R "{{.BIN_DIR}}/{{.APP_NAME}}.app" /tmp/{{.APP_NAME}}-dmg-staging/
-      - ln -s /Applications /tmp/{{.APP_NAME}}-dmg-staging/Applications
-      - hdiutil create -volname "{{.APP_NAME}}" -srcfolder /tmp/{{.APP_NAME}}-dmg-staging -ov -format UDZO "{{.BIN_DIR}}/{{.APP_NAME}}.dmg"
-      - rm -rf /tmp/{{.APP_NAME}}-dmg-staging
-
   codesign:adhoc:
     summary: Ad-hoc signs the app bundle (macOS only)
     internal: true
@@ -202,9 +189,6 @@ tasks:
       - 'echo "Skipping codesign (not available on {{OS}}). Sign the .app on macOS before distribution."'
 
   run:
-    preconditions:
-      - sh: test "$(uname)" = "Darwin"
-        msg: "This task only runs on macOS"
     cmds:
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Resources"
@@ -216,35 +200,28 @@ tasks:
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
       - cp "build/darwin/Info.dev.plist" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Info.plist"
       - codesign --force --deep --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
-      - '{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS/{{.APP_NAME}}'
+      - '"{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS/{{.APP_NAME}}"'
 
   sign:
     summary: Signs the application bundle with Developer ID
     desc: |
       Signs the .app bundle for distribution.
-      Configure SIGN_IDENTITY in the vars section at the top of this file.
+      Uses signing identity from `wails3 setup` (stored in ~/.config/wails/defaults.yaml).
+      Override with: task darwin:sign -- --identity "Developer ID Application: ..."
     deps:
       - task: package
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --identity "{{.SIGN_IDENTITY}}" {{if .ENTITLEMENTS}}--entitlements {{.ENTITLEMENTS}}{{end}}
-    preconditions:
-      - sh: '[ -n "{{.SIGN_IDENTITY}}" ]'
-        msg: "SIGN_IDENTITY is required. Set it in the vars section at the top of build/darwin/Taskfile.yml"
+      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" {{.CLI_ARGS}}
 
   sign:notarize:
     summary: Signs and notarizes the application bundle
     desc: |
       Signs the .app bundle and submits it for notarization.
-      Configure SIGN_IDENTITY and KEYCHAIN_PROFILE in the vars section at the top of this file.
+      Uses signing identity and keychain profile from `wails3 setup`.
 
-      Setup (one-time):
-        wails3 signing credentials --apple-id "you@email.com" --team-id "TEAMID" --password "app-specific-password" --profile "my-profile"
+      First-time setup:
+        wails3 setup
     deps:
       - task: package
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --identity "{{.SIGN_IDENTITY}}" {{if .ENTITLEMENTS}}--entitlements {{.ENTITLEMENTS}}{{end}} --notarize --keychain-profile {{.KEYCHAIN_PROFILE}}
-    preconditions:
-      - sh: '[ -n "{{.SIGN_IDENTITY}}" ]'
-        msg: "SIGN_IDENTITY is required. Set it in the vars section at the top of build/darwin/Taskfile.yml"
-      - sh: '[ -n "{{.KEYCHAIN_PROFILE}}" ]'
-        msg: "KEYCHAIN_PROFILE is required. Set it in the vars section at the top of build/darwin/Taskfile.yml"
+      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --notarize {{.CLI_ARGS}}

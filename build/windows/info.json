@@ -6,7 +6,7 @@
 		"0000": {
 			"ProductVersion": "1.1.0",
 			"CompanyName": "fenv",
-			"FileDescription": "A CmDex application",
+			"FileDescription": "CLI command manager with variable placeholders",
 			"LegalCopyright": "© 2026, fenv",
 			"ProductName": "CmDex",
 			"Comments": "CmDex - Command Manager"

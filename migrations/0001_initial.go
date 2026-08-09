@@ -6,8 +6,8 @@ import (
 )
 
 var migration0001 = Migration{
-	Version:                  1,
-	Description:              "initial schema: all tables, FTS5, and triggers",
+	Version:     1,
+	Description: "initial schema: all tables, FTS5, and triggers",
 	Up: func(tx *sql.Tx) error {
 		stmts := []string{
 			`CREATE TABLE IF NOT EXISTS schema_version (

@@ -49,7 +49,7 @@ func (s *ImportExportService) SaveThemeTemplate() error {
     "status-bar-bg": "#007acc"
   }
 }`
-	return os.WriteFile(path, []byte(template), 0644)
+	return os.WriteFile(path, []byte(template), 0600)
 }
 
 // ExportPreset is the exported format for a variable preset.
@@ -146,7 +146,7 @@ func (s *ImportExportService) ExportCommands(commandIDs []string) error {
 		return fmt.Errorf("marshal JSON: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 // ImportedPreset is the imported format for a variable preset.
@@ -208,7 +208,7 @@ func (s *ImportExportService) ImportCommands() ([]Command, error) {
 	for i, cmd := range importData.Commands {
 		presets := make([]ImportPresetInput, len(cmd.Presets))
 		for j, p := range cmd.Presets {
-			presets[j] = ImportPresetInput{Name: p.Name, Values: p.Values}
+			presets[j] = ImportPresetInput(p)
 		}
 		commands[i] = ImportCommandInput{
 			Title:         cmd.Title,

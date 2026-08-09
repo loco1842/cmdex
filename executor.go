@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,8 +41,8 @@ func NewExecutor() *Executor {
 func stripShebang(content string) string {
 	s := strings.TrimSpace(content)
 	if strings.HasPrefix(s, "#!") {
-		if idx := strings.Index(s, "\n"); idx != -1 {
-			return s[idx+1:]
+		if _, after, ok := strings.Cut(s, "\n"); ok {
+			return after
 		}
 		return ""
 	}
@@ -69,7 +70,7 @@ func (e *Executor) OpenInTerminal(terminalID string, scriptContent string, worki
 		}
 	}
 
-	return fmt.Errorf("no terminal emulator found")
+	return errors.New("no terminal emulator found")
 }
 
 func shellQuoteDir(dir string) string {
@@ -158,7 +159,10 @@ func (e *Executor) darwinTerminals() []terminalDef {
 
 	return []terminalDef{
 		{
-			ID: "terminal", Name: "Terminal", Paths: []string{"/System/Applications/Utilities/Terminal.app"}, IsApp: true,
+			ID:    "terminal",
+			Name:  "Terminal",
+			Paths: []string{"/System/Applications/Utilities/Terminal.app"},
+			IsApp: true,
 			LaunchFn: osa("Terminal", `tell application "Terminal"
 	do script "%s"
 	activate
@@ -294,6 +298,7 @@ func (e *Executor) linuxTerminals() []terminalDef {
 				if workingDir != "" {
 					body = fmt.Sprintf("cd %s && %s", shellQuoteDir(workingDir), body)
 				}
+				//nolint:gosec // G204: shell/body are local executor fields and user-authored script content by design
 				return exec.Command("xterm", "-e", ex.shell, "-c", body+"; exec "+ex.shell).Start()
 			}},
 	}
@@ -330,7 +335,11 @@ func (e *Executor) windowsTerminals() []terminalDef {
 					bin = "pwsh"
 				}
 				if workingDir != "" {
-					body = fmt.Sprintf("Set-Location -LiteralPath '%s' -ErrorAction Stop; %s", strings.ReplaceAll(workingDir, "'", "''"), body)
+					body = fmt.Sprintf(
+						"Set-Location -LiteralPath '%s' -ErrorAction Stop; %s",
+						strings.ReplaceAll(workingDir, "'", "''"),
+						body,
+					)
 				}
 				return exec.Command(bin, "-NoExit", "-Command", body).Start()
 			}},
@@ -355,7 +364,11 @@ func (e *Executor) EvalDefaults(defs []VariableDefinition) map[string]string {
 		cel.Function("env",
 			cel.Overload("env_string", []*cel.Type{cel.StringType}, cel.StringType,
 				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					key := string(val.(types.String))
+					s, ok := val.(types.String)
+					if !ok {
+						return types.NewErr("expected string")
+					}
+					key := string(s)
 					return types.String(os.Getenv(key))
 				}),
 			),
@@ -363,7 +376,11 @@ func (e *Executor) EvalDefaults(defs []VariableDefinition) map[string]string {
 		cel.Function("date",
 			cel.Overload("date_string", []*cel.Type{cel.StringType}, cel.StringType,
 				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					layout := string(val.(types.String))
+					s, ok := val.(types.String)
+					if !ok {
+						return types.NewErr("expected string")
+					}
+					layout := string(s)
 					return types.String(time.Now().Format(layout))
 				}),
 			),

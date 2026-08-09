@@ -402,8 +402,8 @@ Test execution is **not currently part of the CI pipeline**. The CI configuratio
 | `build-check` | push/PR to `main` | Cross-platform build via `task build` on ubuntu-24.04, macos-latest, windows-latest |
 
 **Key CI details:**
-- Wails CLI version: `v3.0.0-alpha.74` (pinned via `WAILS_VERSION` env var in CI)
-- Go version: read from `go.mod` (currently `1.25.0`)
+- Wails CLI version: `v3.0.0-beta.5` (pinned via `WAILS_VERSION` env var in CI)
+- Go version: read from `go.mod` (currently `1.26.0`)
 - Node version: `25`
 - Package manager: `pnpm` (latest via `pnpm/action-setup@v5`)
 - Frontend lint failures are non-blocking (`continue-on-error: true`)

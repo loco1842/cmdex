@@ -1,4 +1,4 @@
-.PHONY: dev build generate check clean
+.PHONY: dev build generate check fmt lint test clean
 
 dev:
 	wails3 dev
@@ -9,12 +9,24 @@ build:
 generate:
 	wails3 generate bindings
 
-test:
-	cd frontend && pnpm test:e2e
-
 check:
+	mkdir -p frontend/dist
 	go build ./...
 	cd frontend && pnpm tsc --noEmit
 
+fmt:
+	golangci-lint fmt
+
+lint:
+	golangci-lint run || true
+
+lint-fix:
+	golangci-lint run --fix || true
+
+test:
+	cd frontend && pnpm test:e2e
+
 clean:
-	rm -rf build/bin frontend/dist
+	rm -rf bin frontend/dist
+	mkdir -p frontend/dist
+	touch frontend/dist/.gitkeep

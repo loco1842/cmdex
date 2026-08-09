@@ -6,9 +6,9 @@ info:
   productName: "CmDex"
   productIdentifier: "com.fenv.cmdex"
   description: "CLI command manager with variable placeholders"
-  copyright: "(c) 2026"
+  copyright: "© 2026, fenv"
   comments: "CmDex - Command Manager"
-  version: "0.1.0"
+  version: "0.3.0"
 
 dev_mode:
   root_path: .

@@ -9,7 +9,7 @@ var migration0010 = Migration{
 	Version:     10,
 	Description: "commands: add working_dir column for OS-keyed paths",
 	Up: func(tx *sql.Tx) error {
-		_, err := tx.Exec(`ALTER TABLE commands ADD COLUMN working_dir TEXT NOT NULL DEFAULT '{}'`) 
+		_, err := tx.Exec(`ALTER TABLE commands ADD COLUMN working_dir TEXT NOT NULL DEFAULT '{}'`)
 		if err != nil {
 			return fmt.Errorf("migration 0010 up: %w", err)
 		}

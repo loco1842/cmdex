@@ -2,9 +2,12 @@
 Version=1.0
 Name=CmDex
 Comment=CLI command manager with variable placeholders
-Exec=/usr/local/bin/cmdex
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/cmdex %u
 Terminal=false
 Type=Application
 Icon=cmdex
-Categories=Utility;Development;
+Categories=Utility;
 StartupWMClass=cmdex
+
+ 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,10 +39,10 @@ type SessionInfo struct {
 
 // sessionState is the internal per-session state: PTY, process, goroutine tracking.
 type sessionState struct {
-	id              string
-	name            string
-	workingDir      string
-	createdAt       time.Time
+	id         string
+	name       string
+	workingDir string
+	createdAt  time.Time
 
 	mu              sync.Mutex
 	ptmx            ptyHandle
@@ -117,7 +118,7 @@ func (s *TerminalService) resolveSession(sessionId string) (*sessionState, error
 		sessionId = s.activeSessionID
 		s.mu.RUnlock()
 		if sessionId == "" {
-			return nil, fmt.Errorf("no active session")
+			return nil, errors.New("no active session")
 		}
 	}
 	s.mu.RLock()
@@ -291,7 +292,7 @@ func (s *TerminalService) CloseSession(id string) error {
 // or the session does not exist.
 func (s *TerminalService) RenameSession(id string, name string) error {
 	if name == "" {
-		return fmt.Errorf("RenameSession: name cannot be empty")
+		return errors.New("RenameSession: name cannot be empty")
 	}
 
 	s.mu.Lock()
@@ -475,11 +476,8 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 // startEmitter creates the output channel and starts the batching emitter goroutine.
 func (ss *sessionState) startEmitter() {
 	ss.outputCh = make(chan string, 512)
-	ss.emitterWg.Add(1)
 
-	go func() {
-		defer ss.emitterWg.Done()
-
+	ss.emitterWg.Go(func() {
 		var buf bytes.Buffer
 		ticker := time.NewTicker(8 * time.Millisecond)
 		defer ticker.Stop()
@@ -490,7 +488,7 @@ func (ss *sessionState) startEmitter() {
 			}
 			seq := atomic.AddUint64(&ss.outputSeq, 1)
 			if wailsApp != nil {
-				wailsApp.Event.Emit("pty-output:"+ss.id, map[string]interface{}{
+				wailsApp.Event.Emit("pty-output:"+ss.id, map[string]any{
 					"data": buf.String(),
 					"seq":  seq,
 				})
@@ -513,7 +511,7 @@ func (ss *sessionState) startEmitter() {
 				flush()
 			}
 		}
-	}()
+	})
 }
 
 // stopEmitter closes the output channel and waits for the emitter goroutine to finish.
@@ -549,7 +547,8 @@ func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx ptyH
 
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = -1
@@ -563,7 +562,7 @@ func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx ptyH
 	ss.mu.Unlock()
 
 	if wailsApp != nil {
-		wailsApp.Event.Emit("pty-exit:"+ss.id, map[string]interface{}{
+		wailsApp.Event.Emit("pty-exit:"+ss.id, map[string]any{
 			"exitCode":       exitCode,
 			"wasIntentional": intentional,
 		})
@@ -604,7 +603,7 @@ func (s *TerminalService) Write(sessionId string, data string) error {
 	}
 
 	if ss.ptmx == nil {
-		return fmt.Errorf("terminal not started")
+		return errors.New("terminal not started")
 	}
 
 	b := []byte(data)
@@ -637,7 +636,7 @@ func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
 	}
 
 	if ss.ptmx == nil {
-		return fmt.Errorf("terminal not started")
+		return errors.New("terminal not started")
 	}
 
 	ss.lastSize = ptyWinsize{Cols: uint16(cols), Rows: uint16(rows)}
@@ -659,7 +658,7 @@ func (s *TerminalService) Clear(sessionId string) error {
 	}
 
 	if ss.ptmx == nil {
-		return fmt.Errorf("terminal not started")
+		return errors.New("terminal not started")
 	}
 
 	clearSeq := "\x1b[H\x1b[2J\x1b[3J"

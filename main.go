@@ -10,6 +10,14 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+const (
+	mainWindowWidth     = 1200
+	mainWindowHeight    = 800
+	mainWindowMinWidth  = 900
+	mainWindowMinHeight = 600
+	windowBgR, windowBgG, windowBgB, windowBgA = 15, 15, 20, 255
+)
+
 func main() {
 	appService := &App{}
 
@@ -64,12 +72,12 @@ func main() {
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:              "CmDex",
-		Width:              1200,
-		Height:             800,
-		MinWidth:           900,
-		MinHeight:          600,
+		Width:              mainWindowWidth,
+		Height:             mainWindowHeight,
+		MinWidth:           mainWindowMinWidth,
+		MinHeight:          mainWindowMinHeight,
 		UseApplicationMenu: true,
-		BackgroundColour:   application.NewRGBA(15, 15, 20, 255),
+		BackgroundColour:   application.NewRGBA(windowBgR, windowBgG, windowBgB, windowBgA),
 	})
 
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {

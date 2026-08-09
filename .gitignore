@@ -6,7 +6,8 @@ build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 
 .task
 frontend/node_modules
-frontend/dist
+frontend/dist/*
+!frontend/dist/.gitkeep
 cmdex
 .worktrees/
 .superpowers/

@@ -9,35 +9,44 @@ includes:
   linux: ./build/linux/Taskfile.yml
 
 vars:
-  APP_NAME: '{{env `APP_NAME` | default "cmdex"}}'
+  APP_NAME: "cmdex"
   BIN_DIR: "bin"
-  VITE_PORT: "{{env `VITE_PORT`}}"
+  PACKAGE_MANAGER: "pnpm"
+  # Target OS for build/package/run. Defaults to the host OS, and is overridden
+  # by `wails3 build GOOS=...` (or the GOOS env var) for cross-compilation. The
+  # tasks below dispatch to the matching platform Taskfile via this variable.
+  GOOS: '{{.GOOS | default OS}}'
 
 tasks:
   build:
     summary: Builds the application
     cmds:
-      - task: "{{OS}}:build"
+      - task: "{{.GOOS}}:build"
 
   package:
     summary: Packages a production build of the application
     cmds:
-      - task: "{{OS}}:package"
+      - task: "{{.GOOS}}:package"
 
   package:universal:
     summary: Packages a darwin universal binary (arm64 + amd64)
     cmds:
       - task: darwin:package:universal
 
+  package:dmg:universal:
+    summary: Packages a darwin universal binary (arm64 + amd64) into a styled `.dmg`
+    cmds:
+      - task: darwin:package:dmg:universal
+
   run:
     summary: Runs the application
     cmds:
-      - task: "{{OS}}:run"
+      - task: "{{.GOOS}}:run"
 
   dev:
     summary: Runs the application in development mode
     cmds:
-      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+      - wails3 dev -config ./build/config.yml -port "${VITE_PORT:-9245}"
 
   setup:docker:
     summary: Builds Docker image for cross-compilation (~800MB download)

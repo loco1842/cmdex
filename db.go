@@ -3,9 +3,11 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,7 +62,9 @@ func (db *DB) runMigrations() error {
 				return fmt.Errorf("insert initial schema_version: %w", err)
 			}
 		} else {
-			if _, err := db.conn.Exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"); err != nil {
+			if _, err := db.conn.Exec(
+				"CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)",
+			); err != nil {
 				return fmt.Errorf("create schema_version table: %w", err)
 			}
 			if _, err := db.conn.Exec("INSERT INTO schema_version (version) VALUES (0)"); err != nil {
@@ -127,7 +131,7 @@ func (db *DB) RollbackTo(targetVersion int) error {
 	var currentVersion int
 	err := db.conn.QueryRow("SELECT version FROM schema_version LIMIT 1").Scan(&currentVersion)
 	if err != nil {
-		return fmt.Errorf("schema_version not initialized")
+		return errors.New("schema_version not initialized")
 	}
 
 	if targetVersion >= currentVersion {
@@ -135,8 +139,8 @@ func (db *DB) RollbackTo(targetVersion int) error {
 	}
 
 	// Iterate in reverse order
-	for i := len(migrations.Migrations) - 1; i >= 0; i-- {
-		m := migrations.Migrations[i]
+	for _, v := range slices.Backward(migrations.Migrations) {
+		m := v
 		if m.Version <= targetVersion {
 			continue
 		}
@@ -189,7 +193,9 @@ func (db *DB) RollbackTo(targetVersion int) error {
 // ---------------------------------------------------------------------------
 
 func (db *DB) GetCategories() ([]Category, error) {
-	rows, err := db.conn.Query("SELECT id, name, icon, color, created_at, updated_at FROM categories ORDER BY created_at")
+	rows, err := db.conn.Query(
+		"SELECT id, name, icon, color, created_at, updated_at FROM categories ORDER BY created_at",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query categories: %w", err)
 	}
@@ -262,7 +268,17 @@ func (db *DB) GetCommands() ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan command: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -298,7 +314,17 @@ func (db *DB) GetCommandsByCategory(categoryID string) ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan command: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -404,12 +430,12 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 		cmdID := uuid.New().String()
 		now := time.Now()
 
-		var catIDPtr interface{}
+		var catIDPtr any
 		if categoryID != nil {
 			catIDPtr = *categoryID
 		}
 
-		var titlePtr, descPtr interface{}
+		var titlePtr, descPtr any
 		if importedCmd.Title != "" {
 			titlePtr = importedCmd.Title
 		}
@@ -420,9 +446,11 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 		// Get max position in category
 		var maxPos int
 		if categoryID != nil {
-			_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", *categoryID).Scan(&maxPos)
+			_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", *categoryID).
+				Scan(&maxPos)
 		} else {
-			_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").Scan(&maxPos)
+			_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").
+				Scan(&maxPos)
 		}
 
 		workingDirJSON, err := json.Marshal(importedCmd.WorkingDir)
@@ -433,7 +461,15 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 		_, err = tx.Exec(
 			`INSERT INTO commands (id, title, description, script_content, category_id, position, created_at, updated_at, working_dir)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			cmdID, titlePtr, descPtr, importedCmd.ScriptContent, catIDPtr, maxPos+1, now, now, string(workingDirJSON),
+			cmdID,
+			titlePtr,
+			descPtr,
+			importedCmd.ScriptContent,
+			catIDPtr,
+			maxPos+1,
+			now,
+			now,
+			string(workingDirJSON),
 		)
 		if err != nil {
 			return fmt.Errorf("insert command: %w", err)
@@ -461,7 +497,12 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 		for i, v := range importedCmd.Variables {
 			_, err := tx.Exec(
 				"INSERT INTO variable_definitions (command_id, name, description, example, default_expr, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-				cmdID, v.Name, v.Description, v.Example, v.Default, i,
+				cmdID,
+				v.Name,
+				v.Description,
+				v.Example,
+				v.Default,
+				i,
 			)
 			if err != nil {
 				return fmt.Errorf("insert variable: %w", err)
@@ -498,7 +539,8 @@ func (db *DB) GetCommand(id string) (Command, error) {
 	var catID sql.NullString
 	var workingDirRaw string
 	err := db.conn.QueryRow(
-		"SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir FROM commands WHERE id = ?", id,
+		"SELECT id, title, description, script_content, category_id, position, created_at, updated_at, working_dir FROM commands WHERE id = ?",
+		id,
 	).Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw)
 	if err != nil {
 		return c, fmt.Errorf("get command %s: %w", id, err)
@@ -600,14 +642,14 @@ func (db *DB) loadCommandRelations(cmd *Command) error {
 	return presetRows.Err()
 }
 
-func nullableString(s string) interface{} {
+func nullableString(s string) any {
 	if s == "" {
 		return nil
 	}
 	return s
 }
 
-func nullableNullString(ns sql.NullString) interface{} {
+func nullableNullString(ns sql.NullString) any {
 	if !ns.Valid || ns.String == "" {
 		return nil
 	}
@@ -629,9 +671,15 @@ func (db *DB) CreateCommand(cmd Command) error {
 	_, err = tx.Exec(
 		`INSERT INTO commands (id, title, description, script_content, category_id, position, created_at, updated_at, working_dir)
 		 VALUES (?, ?, ?, ?, ?, COALESCE((SELECT MAX(position)+1 FROM commands WHERE category_id IS ?), 0), ?, ?, ?)`,
-		cmd.ID, nullableNullString(cmd.Title), nullableNullString(cmd.Description), cmd.ScriptContent,
-		nullableString(cmd.CategoryID), nullableString(cmd.CategoryID),
-		cmd.CreatedAt, cmd.UpdatedAt, string(workingDirJSON),
+		cmd.ID,
+		nullableNullString(cmd.Title),
+		nullableNullString(cmd.Description),
+		cmd.ScriptContent,
+		nullableString(cmd.CategoryID),
+		nullableString(cmd.CategoryID),
+		cmd.CreatedAt,
+		cmd.UpdatedAt,
+		string(workingDirJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("insert command: %w", err)
@@ -696,13 +744,28 @@ func (db *DB) UpdateCommand(cmd Command) error {
 		// Category already updated by UpdateCommandPosition, so skip it
 		_, updateErr = tx.Exec(
 			"UPDATE commands SET title = ?, description = ?, script_content = ?, updated_at = ?, working_dir = ? WHERE id = ?",
-			nullableNullString(cmd.Title), nullableNullString(cmd.Description), cmd.ScriptContent, cmd.UpdatedAt, string(workingDirJSON), cmd.ID,
+			nullableNullString(
+				cmd.Title,
+			),
+			nullableNullString(cmd.Description),
+			cmd.ScriptContent,
+			cmd.UpdatedAt,
+			string(workingDirJSON),
+			cmd.ID,
 		)
 	} else {
 		// Category didn't change, safe to update everything
 		_, updateErr = tx.Exec(
 			"UPDATE commands SET title = ?, description = ?, script_content = ?, category_id = ?, updated_at = ?, working_dir = ? WHERE id = ?",
-			nullableNullString(cmd.Title), nullableNullString(cmd.Description), cmd.ScriptContent, nullableString(cmd.CategoryID), cmd.UpdatedAt, string(workingDirJSON), cmd.ID,
+			nullableNullString(
+				cmd.Title,
+			),
+			nullableNullString(cmd.Description),
+			cmd.ScriptContent,
+			nullableString(cmd.CategoryID),
+			cmd.UpdatedAt,
+			string(workingDirJSON),
+			cmd.ID,
 		)
 	}
 	if updateErr != nil {
@@ -872,7 +935,12 @@ func (db *DB) saveVariables(tx *sql.Tx, commandID string, vars []VariableDefinit
 	for i, v := range vars {
 		_, err := tx.Exec(
 			"INSERT INTO variable_definitions (command_id, name, description, example, default_expr, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-			commandID, v.Name, v.Description, v.Example, v.Default, i,
+			commandID,
+			v.Name,
+			v.Description,
+			v.Example,
+			v.Default,
+			i,
 		)
 		if err != nil {
 			return fmt.Errorf("insert variable %s: %w", v.Name, err)
@@ -886,7 +954,10 @@ func (db *DB) saveVariables(tx *sql.Tx, commandID string, vars []VariableDefinit
 // ---------------------------------------------------------------------------
 
 func (db *DB) GetPresets(commandID string) ([]VariablePreset, error) {
-	rows, err := db.conn.Query("SELECT id, name, position FROM variable_presets WHERE command_id = ? ORDER BY position, name", commandID)
+	rows, err := db.conn.Query(
+		"SELECT id, name, position FROM variable_presets WHERE command_id = ? ORDER BY position, name",
+		commandID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query presets: %w", err)
 	}
@@ -930,7 +1001,8 @@ func (db *DB) SavePreset(commandID string, preset VariablePreset) error {
 	defer tx.Rollback()
 
 	var maxPos int
-	_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM variable_presets WHERE command_id = ?", commandID).Scan(&maxPos)
+	_ = tx.QueryRow("SELECT COALESCE(MAX(position), -1) FROM variable_presets WHERE command_id = ?", commandID).
+		Scan(&maxPos)
 
 	_, err = tx.Exec("INSERT INTO variable_presets (id, command_id, name, position) VALUES (?, ?, ?, ?)",
 		preset.ID, commandID, preset.Name, maxPos+1,
@@ -1003,7 +1075,12 @@ func (db *DB) ReorderPresets(commandID string, presetIDs []string) error {
 	defer tx.Rollback()
 
 	for i, id := range presetIDs {
-		if _, err := tx.Exec("UPDATE variable_presets SET position = ? WHERE id = ? AND command_id = ?", i, id, commandID); err != nil {
+		if _, err := tx.Exec(
+			"UPDATE variable_presets SET position = ? WHERE id = ? AND command_id = ?",
+			i,
+			id,
+			commandID,
+		); err != nil {
 			return fmt.Errorf("reorder preset: %w", err)
 		}
 	}
@@ -1027,7 +1104,17 @@ func (db *DB) GetExecutions() ([]ExecutionRecord, error) {
 	records := []ExecutionRecord{}
 	for rows.Next() {
 		var r ExecutionRecord
-		if err := rows.Scan(&r.ID, &r.CommandID, &r.ScriptContent, &r.FinalCmd, &r.Output, &r.Error, &r.ExitCode, &r.WorkingDir, &r.ExecutedAt); err != nil {
+		if err := rows.Scan(
+			&r.ID,
+			&r.CommandID,
+			&r.ScriptContent,
+			&r.FinalCmd,
+			&r.Output,
+			&r.Error,
+			&r.ExitCode,
+			&r.WorkingDir,
+			&r.ExecutedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan execution: %w", err)
 		}
 		records = append(records, r)
@@ -1038,7 +1125,15 @@ func (db *DB) GetExecutions() ([]ExecutionRecord, error) {
 func (db *DB) AddExecution(record ExecutionRecord) error {
 	_, err := db.conn.Exec(
 		"INSERT INTO executions (id, command_id, script_content, final_cmd, output, error, exit_code, working_dir, executed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		record.ID, record.CommandID, record.ScriptContent, record.FinalCmd, record.Output, record.Error, record.ExitCode, record.WorkingDir, record.ExecutedAt,
+		record.ID,
+		record.CommandID,
+		record.ScriptContent,
+		record.FinalCmd,
+		record.Output,
+		record.Error,
+		record.ExitCode,
+		record.WorkingDir,
+		record.ExecutedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert execution: %w", err)
@@ -1084,7 +1179,17 @@ func (db *DB) SearchCommands(query string) ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -1124,7 +1229,17 @@ func (db *DB) searchCommandsLike(query string) ([]Command, error) {
 		var c Command
 		var catID sql.NullString
 		var workingDirRaw string
-		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.ScriptContent, &catID, &c.Position, &c.CreatedAt, &c.UpdatedAt, &workingDirRaw); err != nil {
+		if err := rows.Scan(
+			&c.ID,
+			&c.Title,
+			&c.Description,
+			&c.ScriptContent,
+			&catID,
+			&c.Position,
+			&c.CreatedAt,
+			&c.UpdatedAt,
+			&workingDirRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan like result: %w", err)
 		}
 		c.CategoryID = catID.String
@@ -1164,7 +1279,7 @@ func (db *DB) GetSettings() (AppSettings, error) {
 
 	var raw string
 	err := db.conn.QueryRow(`SELECT data FROM app_settings LIMIT 1`).Scan(&raw)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		data, _ := json.Marshal(defaults)
 		_, err = db.conn.Exec(`INSERT INTO app_settings (data) VALUES (?)`, string(data))
 		if err != nil {
@@ -1273,10 +1388,19 @@ func (db *DB) ResetAll() error {
 	defaultSettingsX, defaultSettingsY := -1, -1
 	defaultSettingsW, defaultSettingsH := 640, 520
 	defaultSettings, _ := json.Marshal(AppSettings{
-		Locale: "en", Terminal: "", Theme: "vscode-dark",
-		LastDarkTheme: "vscode-dark", LastLightTheme: "vscode-light",
-		CustomThemes: "[]", UIFont: "Inter", MonoFont: "JetBrains Mono", Density: "comfortable",
-		WindowX: &defaultSettingsX, WindowY: &defaultSettingsY, WindowWidth: &defaultSettingsW, WindowHeight: &defaultSettingsH,
+		Locale:         "en",
+		Terminal:       "",
+		Theme:          "vscode-dark",
+		LastDarkTheme:  "vscode-dark",
+		LastLightTheme: "vscode-light",
+		CustomThemes:   "[]",
+		UIFont:         "Inter",
+		MonoFont:       "JetBrains Mono",
+		Density:        "comfortable",
+		WindowX:        &defaultSettingsX,
+		WindowY:        &defaultSettingsY,
+		WindowWidth:    &defaultSettingsW,
+		WindowHeight:   &defaultSettingsH,
 	})
 	if _, err := tx.Exec(`INSERT INTO app_settings (data) VALUES (?)`, string(defaultSettings)); err != nil {
 		return fmt.Errorf("insert default settings: %w", err)

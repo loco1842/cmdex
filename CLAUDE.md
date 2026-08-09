@@ -2,57 +2,70 @@
 
 ## Project Overview
 
-Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI commands as bash scripts with dynamic variable arguments. Built with Go + Wails v2 (backend/desktop) and React + TypeScript + Vite (frontend).
+Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI commands as bash scripts with dynamic variable arguments. Built with Go + Wails v3 (backend/desktop) and React + TypeScript + Vite (frontend).
 
 Data is stored locally in a SQLite database at `~/.cmdex/cmdex.db` using `modernc.org/sqlite` (pure Go, no CGo).
 
 ## Prerequisites
 
-- Go 1.23+
-- [Wails v2 CLI](https://wails.io/docs/gettingstarted/installation) (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
-- Node.js with pnpm (frontend package manager, configured in `wails.json`)
+- Go 1.26+ (see `go.mod`)
+- Wails v3 CLI, pinned to `v3.0.0-beta.5` (see `.github/workflows/ci.yml`'s `WAILS_VERSION`): `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.5`
+- Node.js 24+ with pnpm (frontend package manager; see `frontend/package.json`, `build/config.yml`)
+- `wails.json` at the repo root is a leftover Wails v2 config file and is not read by the v3 toolchain — project config lives in `build/config.yml`
 
 ## Commands
 
 ```bash
 # Development (hot-reloads frontend, restart needed for Go changes)
-wails dev                 # or: make dev
+wails3 dev                # or: make dev  or: task dev
 
-# Production build (output: build/bin/)
-wails build               # or: make build
+# Production build (output: bin/, not build/bin/)
+wails3 build              # or: make build  or: task build
 
-# Regenerate TypeScript bindings after Go changes (also happens on wails dev)
-wails generate module     # or: make generate
+# Regenerate TypeScript bindings after Go changes (also happens on wails3 dev)
+wails3 generate bindings  # or: make generate
 
 # Type-check Go and TypeScript
 make check                # runs: go build ./... && cd frontend && pnpm tsc --noEmit
 
+# Go formatting/lint (not wired into `make check`; lint runs advisory in CI)
+make fmt                  # golangci-lint fmt (rewrites files: goimports + golines)
+make lint                 # golangci-lint run (same config as CI)
+
 # Clean build artifacts
-make clean                # removes build/bin/ and frontend/dist/
+make clean                # removes bin/ and frontend/dist/, then restores the
+                           # tracked frontend/dist/.gitkeep placeholder that
+                           # //go:embed all:frontend/dist in main.go requires
 
 # Frontend dependencies (pnpm required)
 cd frontend && pnpm install
 ```
 
-**No tests exist yet** — there are no Go or frontend test files in this project.
+**Tests exist:** Go tests (`db_test.go`, `terminal_service_test.go` + stress/max-sessions variants) run via `go test ./...`; frontend Playwright e2e tests run via `cd frontend && pnpm test:e2e` (or `make test`). `make check` and CI only run `go build ./...` + `pnpm tsc --noEmit` — tests are not part of that gate.
 
 ## Architecture
 
 ### Wails Bindings (Go <-> Frontend)
 
-The `App` struct in `app.go` exposes methods to the frontend. Wails auto-generates TypeScript bindings at `frontend/wailsjs/go/main/App.ts`. To add a backend feature:
-1. Add a method to `App` in `app.go`
-2. Run `wails dev` or `wails generate module` to regenerate bindings
-3. Import the generated function in React — path is depth-relative: `'../wailsjs/go/main/App'` from `src/`, `'../../wailsjs/go/main/App'` from `src/components/`
+Seven services are registered as `application.Service` in `main.go` — not a single monolithic `App` struct. Wails auto-generates TypeScript bindings per service under `frontend/bindings/cmdex/<servicename>.js` (**not** `frontend/wailsjs/`, which doesn't exist in this v3 project). To add a backend feature:
+1. Add a method to the relevant service struct (or create a new service and register it in `main.go`'s `Services` slice)
+2. Run `wails3 generate bindings` (or `wails3 dev`, which regenerates automatically) to regenerate bindings
+3. Import the generated function in React: `import { SomeMethod } from '../bindings/cmdex/servicename'` (path is depth-relative to the importing file)
 
 ### Backend (Go)
 
-- **`main.go`** - Entry point, Wails window config, native menu setup
-- **`app.go`** - `App` struct with all bound methods (CRUD for categories/commands/presets, execution, search, settings)
+- **`main.go`** - Entry point: `application.New(...)`, service registration, native menu setup, main window config
+- **`app.go`** - `App` service: lifecycle (`ServiceStartup`/`ServiceShutdown`), settings window management, `GetOS`, `PickDirectory`; holds package-level `db`/`executor`/`wailsApp` vars
+- **`command_service.go`** - `CommandService`: CRUD for categories/commands/presets, search
+- **`execution_service.go`** - `ExecutionService`: `RunCommand`, `GetVariables`, execution history
+- **`settings_service.go`** - `SettingsService`: `GetSettings`/`SetSettings`
+- **`importexport_service.go`** - `ImportExportService`: import/export commands, theme templates
+- **`event_service.go`** - `EventService`: exposes event name constants to the frontend
+- **`terminal_service.go`** + **`pty_backend*.go`** - `TerminalService`: multi-session PTY-backed terminals
 - **`models.go`** - Data types: `Category`, `Command`, `VariableDefinition`, `VariablePreset`, `ExecutionRecord`, `AppSettings`
-- **`db.go`** - SQLite database layer with schema migrations, FTS5 full-text search, normalized tables (categories, commands, tags, variable_definitions, variable_presets, executions, app_settings)
+- **`db.go`** - SQLite database layer with FTS5 full-text search, normalized tables (categories, commands, tags, variable_definitions, variable_presets, executions, app_settings); migrations live in the `migrations/` package
 - **`script.go`** - Script generation (`GenerateScript`), body extraction (`ParseScriptBody`), `{{var}}` template extraction (`ExtractTemplateVars`), replacement (`ReplaceTemplateVars`), and variable merging (`MergeDetectedVars`)
-- **`executor.go`** - Script execution via temp files (`os/exec`), streaming output via Wails events (`cmd-output`), terminal emulator detection/launch, CEL expression evaluation for variable defaults (supports `now()`, `env()`, `date()`)
+- **`executor.go`** - Script execution via temp files (`os/exec`), streaming output via `wailsApp.Event.Emit` (e.g. `pty-output:<id>`, `pty-exit:<id>`), terminal emulator detection/launch, CEL expression evaluation for variable defaults (supports `now()`, `env()`, `date()`)
 
 Scripts are stored with `{{variableName}}` template placeholders. At execution time, `{{var}}` placeholders are replaced with user-provided values, written to a temp file, and executed with `bash <tmpfile>`. Variables are auto-detected from `{{var}}` patterns in the script body and can also be added manually.
 
@@ -74,8 +87,8 @@ Streaming output: Go emits `cmd-output` Wails events -> frontend buffers with `r
 
 1. Update struct in `models.go`
 2. Update schema and queries in `db.go`
-3. Update method signatures in `app.go`
-4. Run `wails generate module` to regenerate bindings
+3. Update method signatures in the relevant `*_service.go` file
+4. Run `wails3 generate bindings` to regenerate bindings
 5. Update TypeScript interfaces in `frontend/src/types.ts`
 6. Update the relevant UI (`CommandDetail.tsx` or `CategoryEditor.tsx`)
 7. Update calls in `App.tsx`
@@ -116,7 +129,7 @@ The editor uses a tab-based interface (replaced modal `CommandEditor`):
 - Exception: `commands.category_id` uses `ON DELETE SET NULL` (deleting a category uncategorizes its commands rather than deleting them)
 - Theme colors use CSS variables - modify those rather than hardcoding colors
 - The output panel does not support interactive shells or full ANSI color rendering
-- `wails generate module` warnings about `Not found: time.Time` are normal and expected — Wails serializes `time.Time` as strings
+- `time.Time` fields (e.g. `CreatedAt`, `ExecutedAt`) generate as plain `string`-typed fields in the bindings — no separate `time` package output, no warnings expected
 
 ## Gotchas
 
@@ -124,51 +137,56 @@ The editor uses a tab-based interface (replaced modal `CommandEditor`):
 - After changing Go structs or method signatures, delete `~/.cmdex/cmdex.db` if schema changed, or bump `schemaVersion` and add migration in `db.go`
 - Schema migrations must recreate tables (SQLite doesn't support `ALTER COLUMN`) — see v1->v2 migration pattern in `db.go`
 - Schema migrations must be wrapped in transactions to prevent partial failures leaving DB inconsistent
-- `wails build` requires `frontend/dist` to exist — run `cd frontend && pnpm build` first, or use `wails dev` which handles it
+- `//go:embed all:frontend/dist` in `main.go` requires `frontend/dist` to exist and be non-empty, or `go build`/`go vet`/`go test`/`wails3 build` all fail with `pattern all:frontend/dist: no matching files found`. A tracked `frontend/dist/.gitkeep` placeholder keeps this working on a fresh checkout; `make clean` deletes and restores it. `wails3 build`/`wails3 dev` build the real frontend first so this only bites bare `go build`/`go test` invocations.
 - When changing script storage format, delete `~/.cmdex/cmdex.db` to reset
 - `RenameCommand` is a separate metadata-only DB method — don't re-process scripts through `UpdateCommand` just to change the title
 
 ### Schema Migration Pattern (SQLite)
 
-SQLite doesn't support `ALTER COLUMN`, so schema changes require table recreation. Follow this pattern in `db.go`:
+SQLite doesn't support `ALTER COLUMN`, so schema changes require table recreation. Migrations live in the `migrations/` package (`migrations/NNNN_description.go`), not inline in `db.go`. Each file defines a `Migration` struct (see `migrations/migration.go`):
 
 ```go
-// Migration v1 -> v2 example: make column nullable with FK change
-if version < 2 {
-    tx, err := db.conn.Begin()
-    if err != nil { return err }
-    defer tx.Rollback()
+package migrations
 
-    migrations := []string{
-        `CREATE TABLE commands_new (...)`,  // New schema
-        `INSERT INTO commands_new SELECT * FROM commands`,  // Copy data
-        `DROP TABLE commands`,
-        `ALTER TABLE commands_new RENAME TO commands`,
-        // Re-create triggers, indexes, etc.
-    }
-    for _, m := range migrations {
-        if _, err := tx.Exec(m); err != nil { return err }
-    }
-    if _, err := tx.Exec("UPDATE schema_version SET version = ?", 2); err != nil {
-        return err
-    }
-    if err := tx.Commit(); err != nil { return err }
+import "database/sql"
+
+var migrationNNNN = Migration{
+	Version:     N, // schema_version value after this migration
+	Description: "what this migration does",
+	Up: func(tx *sql.Tx) error {
+		stmts := []string{
+			`CREATE TABLE commands_new (...)`,                  // New schema
+			`INSERT INTO commands_new SELECT * FROM commands`,  // Copy data
+			`DROP TABLE commands`,
+			`ALTER TABLE commands_new RENAME TO commands`,
+			// Re-create triggers, indexes, FTS table/triggers
+		}
+		for _, s := range stmts {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
+		}
+		return nil
+	},
 }
 ```
 
+Then append the new migration to the `Migrations` slice in `migrations/migration.go`.
+
 **Key rules:**
-- Always wrap in transactions (`BEGIN`/`COMMIT`/`ROLLBACK`)
-- After recreating `commands` table, rebuild the FTS index: `INSERT INTO commands_fts(commands_fts) VALUES('rebuild')` — skipping this leaves FTS out of sync
-- Recreate FTS triggers after table changes
-- Update `schemaVersion` constant at top of file
-- Handle data transformation (e.g., empty string → NULL) in migration
+- The runner (`db.go`) wraps each migration's `Up` in a transaction automatically — don't `BEGIN`/`COMMIT` inside `Up`.
+- `Migrations` is compared by `Migration.Version`, not slice index — version 4 was intentionally merged into 5, so versions can skip.
+- Set `DisableFKDuringMigration: true` only if the migration needs `PRAGMA foreign_keys = OFF` before its transaction begins (see `migration0005`).
+- After recreating the `commands` table, rebuild the FTS index: `INSERT INTO commands_fts(commands_fts) VALUES('rebuild')` — skipping this leaves FTS out of sync.
+- Recreate FTS triggers after table changes.
+- Handle data transformation (e.g., empty string → NULL) in the migration.
 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
 **Cmdex v2 — Premium Release**
 
-Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI commands as bash scripts with dynamic variable arguments. Built with Go + Wails v2 (backend) and React + TypeScript + Vite (frontend), with SQLite local storage. This milestone adds workspace management, cloud sync/sharing, user-defined themes, and a comprehensive UI/UX overhaul to transform Cmdex into a premium command management tool.
+Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI commands as bash scripts with dynamic variable arguments. Built with Go + Wails v3 (backend) and React + TypeScript + Vite (frontend), with SQLite local storage. This milestone adds workspace management, cloud sync/sharing, user-defined themes, and a comprehensive UI/UX overhaul to transform Cmdex into a premium command management tool.
 
 **Core Value:** Users can organize commands by project context, sync them across devices, and share them with the community — all in a clean, customizable interface.
 
@@ -176,7 +194,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 
 - **Tech stack**: Must use Cloudflare services for cloud backend — user preference for Cloudflare ecosystem
 - **Auth**: OAuth-only (Google/GitHub) — no email/password flows
-- **Desktop framework**: Wails v2 — existing investment, not migrating
+- **Desktop framework**: Wails v3 — existing investment, not migrating away
 - **Frontend**: React + TypeScript + Tailwind — existing stack, not changing
 - **Data**: SQLite remains local data store — cloud sync is additive, not replacement
 <!-- GSD:project-end -->
@@ -185,49 +203,52 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 ## Technology Stack
 
 ## Languages
-- **Go** (toolchain `1.25.0` per `go.mod`) — Wails backend, SQLite access, script execution, CEL evaluation, OS terminal integration (`main.go`, `app.go`, `db.go`, `executor.go`, `script.go`, `models.go`).
-- **TypeScript** (`typescript` `^5.9.3` in `frontend/package.json`) — React UI and Wails-generated bindings under `frontend/wailsjs/`.
+- **Go** (toolchain `1.26.0` per `go.mod`) — Wails backend, SQLite access, script execution, CEL evaluation, OS terminal integration (`main.go`, `app.go`, `db.go`, `executor.go`, `script.go`, `models.go`, plus `*_service.go` service files and the `migrations/` package).
+- **TypeScript** (`typescript` `^5.9.3` in `frontend/package.json`) — React UI and Wails-generated bindings under `frontend/bindings/`.
 - **JSON** — i18n resources (`frontend/src/locales/en.json`).
 - **CSS** — Tailwind v4–driven styling via `frontend/src/style.css` and `@tailwindcss/vite`.
 ## Runtime
-- **Go** `1.25.0` — declared in `go.mod`; CI pins `go-version: '1.25'` in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
-- **Node.js** — CI uses Node `25` / `25.x` (see `.github/workflows/ci.yml`, `.github/workflows/release.yml`); no `.nvmrc` in repo.
-- **pnpm** — frontend installs and Wails hooks (`wails.json`: `frontend:install`: `pnpm install`).
+- **Go** `1.26.0` — declared in `go.mod`; CI (`.github/workflows/ci.yml`, `release.yml`) resolves the toolchain dynamically via `go-version-file: go.mod`, not a hardcoded version.
+- **Node.js** — CI uses `NODE_VERSION: '24'` (see `.github/workflows/ci.yml`, `.github/workflows/release.yml`); no `.nvmrc` in repo.
+- **pnpm** — frontend installs (`frontend/package.json`, `frontend/pnpm-lock.yaml`); driven by `build/Taskfile.yml`'s `PACKAGE_MANAGER` var, not `wails.json` (a stale, unused Wails v2 config file).
 - Lockfile: `frontend/pnpm-lock.yaml` (present).
 ## Frameworks
-- **Wails v2** (`github.com/wailsapp/wails/v2` `v2.11.0` in `go.mod`) — desktop shell, asset server embedding `frontend/dist` (`//go:embed all:frontend/dist` in `main.go`), Go↔JS bindings (`wails generate module` → `frontend/wailsjs/go/main/App.ts`).
-- **React** `^19.2.4` + **React DOM** `^19.2.4` — UI in `frontend/src/` (entry `frontend/src/main.tsx`, root `frontend/src/App.tsx`).
-- **Vite** `^7.3.1` with `@vitejs/plugin-react` `^5.1.4` — dev server and production bundle (`frontend/vite.config.ts`).
-- Not applicable — no Go test files or frontend `*.test.*` / `*.spec.*` files; `Makefile` `check` runs `go build ./...` and `pnpm tsc --noEmit` only.
-- **Wails CLI** — `wails dev`, `wails build`, `wails generate module` (documented in `Makefile`, `CLAUDE.md`).
+- **Wails v3** (`github.com/wailsapp/wails/v3` `v3.0.0-beta.5` in `go.mod`) — desktop shell via `application.New(...)`, asset server embedding `frontend/dist` (`//go:embed all:frontend/dist` in `main.go`), Go↔JS bindings (`wails3 generate bindings` → `frontend/bindings/cmdex/<servicename>.js`).
+- **React** `^19.2.7` + **React DOM** `^19.2.7` — UI in `frontend/src/` (entry `frontend/src/main.tsx`, root `frontend/src/App.tsx`).
+- **Vite** `^8.0.16` with `@vitejs/plugin-react` `^5.2.0` — dev server and production bundle (`frontend/vite.config.ts`), plus the `@wailsio/runtime/plugins/vite` bindings plugin.
+- Go: `db_test.go`, `terminal_service_test.go` (+ stress/max-sessions variants, `//go:build darwin`) via `go test ./...`. Frontend: Playwright e2e under `frontend/e2e/` via `pnpm test:e2e`. `Makefile` `check` runs only `go build ./...` + `pnpm tsc --noEmit` — tests are a separate step.
+- **Wails CLI** — `wails3 dev`, `wails3 build`, `wails3 generate bindings` (documented in `Makefile`, `AGENTS.md`).
 - **TypeScript compiler** — `frontend` build script: `tsc && vite build` (`frontend/package.json`).
-- **GitHub Actions** — `dAppCore/build/actions/build/wails2@v4.0.0` for matrix desktop builds (`.github/workflows/ci.yml`, `.github/workflows/release.yml`).
+- **GitHub Actions** — plain `actions/checkout`/`actions/setup-go`/`actions/setup-node`/`pnpm/action-setup` steps plus a manually `go install`ed `wails3` CLI and `arduino/setup-task` for Taskfile-driven builds; matrix over `ubuntu-24.04`/`macos-latest`/`windows-latest` (`.github/workflows/ci.yml`, `.github/workflows/release.yml`). No third-party "wails" GitHub Action is used.
 ## Key Dependencies
-- `github.com/wailsapp/wails/v2` `v2.11.0` — application framework and desktop integration.
+- `github.com/wailsapp/wails/v3` `v3.0.0-beta.5` — application framework and desktop integration (webview2 is folded into this module as of beta.5, no longer a separate dependency).
 - `modernc.org/sqlite` `v1.47.0` — pure-Go SQLite driver (imported in `db.go` as `_ "modernc.org/sqlite"`).
 - `github.com/google/cel-go` `v0.27.0` — CEL for variable default expressions in `executor.go`.
 - `github.com/google/uuid` `v1.6.0` — ID generation for domain entities.
+- `github.com/creack/pty` — PTY backend for `TerminalService` (`terminal_service.go`, `pty_backend_unix.go`).
 - `radix-ui` / `@radix-ui/react-slot` — accessible primitives (shadcn-style components under `frontend/src/components/ui/`).
-- `@tailwindcss/vite` + `tailwindcss` `^4.2.1` — styling pipeline.
+- `@tailwindcss/vite` + `tailwindcss` `^4.3.1` — styling pipeline.
 - `i18next` + `react-i18next` — localization wired in `frontend/src/i18n.ts`.
 - `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` — drag-and-drop in the UI.
+- `@xterm/xterm` + addons — terminal emulator rendering for `TerminalService` sessions.
 - `cmdk` — command palette patterns.
 - `sonner` — toasts.
 - `lucide-react` — icons (aligned with `frontend/components.json` `iconLibrary`).
-- Wails pulls **Echo**, **go-webview2** (Windows), **godbus** (Linux), **gorilla/websocket**, and other platform helpers — transitive in `go.mod`, not referenced directly from app packages.
+- Wails v3 pulls platform helpers (webview2 internally on Windows, `godbus` on Linux, `coder/websocket`) transitively via `go.mod`, not referenced directly from app packages.
 ## Configuration
 - No `VITE_*` or `process.env` usage detected in `frontend/src` TypeScript/TSX.
 - Runtime data path is derived from `os.UserHomeDir()` in `db.go` (not environment variables).
-- **Wails:** `wails.json` — app name `cmdex`, output `cmdex`, pnpm frontend scripts.
-- **Vite:** `frontend/vite.config.ts` — React + Tailwind plugins, path alias `@` → `frontend/src`.
+- **Wails:** `build/config.yml` — app metadata, dev-mode file watching; `wails.json` is a stale, unread Wails v2 leftover.
+- **Vite:** `frontend/vite.config.ts` — React + Tailwind plugins, path alias `@` → `frontend/src`, Wails bindings plugin.
 - **TypeScript:** `frontend/tsconfig.json` — `strict: false`, `paths` `@/*` → `./src/*`; `frontend/tsconfig.node.json` for tooling.
 - **UI generator metadata:** `frontend/components.json` — shadcn schema, New York style, aliases for `@/components`, `@/lib`.
+- **Go lint:** `.golangci.yml` (golangci-lint v2 config, `forbidigo` disabled — conflicts with this codebase's `fmt.Println` logging convention). Runs advisory (`continue-on-error: true`) in CI's `typecheck` job via `golangci/golangci-lint-action`; not wired into `make check`. Run the same config locally with `make lint`.
 ## Platform Requirements
-- Go matching `go.mod` (1.25.x).
-- Wails v2 CLI (see project docs in `CLAUDE.md`).
-- Node.js compatible with CI (25.x) and pnpm.
-- macOS / Linux / Windows for full parity with terminal-launch paths in `executor.go`.
-- Desktop targets built via Wails; artifacts produced by local `wails build` or GitHub Actions release workflow (`.github/workflows/release.yml`).
+- Go matching `go.mod` (1.26.x).
+- Wails v3 CLI, pinned to `v3.0.0-beta.5` (see `docs/GETTING-STARTED.md`).
+- Node.js 24.x (matches CI) and pnpm.
+- macOS / Linux / Windows for full parity with terminal-launch paths in `executor.go` (Windows `conpty` backend is currently a stub — see `AGENTS.md` Tests section).
+- Desktop targets built via Wails; artifacts produced by local `wails3 build`/`task package` or the GitHub Actions release workflow (`.github/workflows/release.yml`).
 <!-- GSD:stack-end -->
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
@@ -249,15 +270,15 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Functions and variables: **camelCase** (`getCommandDisplayTitle`, `emptyDraft`, `isNewCommandTabId`).
 - Constants: **SCREAMING_SNAKE_CASE** where used for shortcut registry keys in `frontend/src/lib/shortcuts.ts` (re-exported via `useKeyboardShortcuts`).
 ## Code Style
-- Standard **gofmt** layout (tabs for indentation). No project-local `golangci-lint` or `.editorconfig` detected.
-- Module path: `cmdex` in `go.mod`; Go **1.25.0** as declared there.
+- Standard **gofmt** layout (tabs for indentation). `.golangci.yml` (golangci-lint v2 config) runs advisory in CI (`continue-on-error: true`) and locally via `make lint` (`golangci-lint run || true` — the `|| true` keeps it advisory, since golangci-lint's own exit code is non-zero on findings). Not wired into `make check`. `make fmt` (`golangci-lint fmt`) is a separate formatting command that rewrites files using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`). No `.editorconfig` detected.
+- Module path: `cmdex` in `go.mod`; Go **1.26.0** as declared there.
 - **TypeScript** with `frontend/tsconfig.json`: `strict` is **false**; `forceConsistentCasingInFileNames` is true.
 - **Mixed punctuation style**: root `App.tsx` and many components use semicolons and often single quotes; `frontend/src/components/ui/button.tsx` and `frontend/src/lib/utils.ts` use double quotes and omit semicolons. New code should match the file you are editing.
 - **Build**: `frontend/package.json` runs `tsc && vite build` for production; type-check only via `pnpm tsc --noEmit` (see `Makefile` `check` target).
 - Tailwind CSS v4 via `@tailwindcss/vite` in `frontend/vite.config.ts`; theme tokens live in `frontend/src/style.css` (CSS variables for dark theme).
 ## Import Organization
 - `@/*` maps to `frontend/src/*` in both `frontend/tsconfig.json` and `frontend/vite.config.ts`.
-- Standard library first, then blank line, then third-party (e.g. `github.com/google/uuid`, `github.com/wailsapp/wails/v2/...`, `modernc.org/sqlite` side-effect in `db.go`).
+- Standard library first, then blank line, then third-party (e.g. `github.com/google/uuid`, `github.com/wailsapp/wails/v3/...`, `modernc.org/sqlite` side-effect in `db.go`), then a final blank line before local `cmdex/...` imports (e.g. `cmdex/migrations` in `db.go`).
 ## Error Handling
 - Wails startup failures: `wailsruntime.LogFatal` in `app.go` `startup` when DB init fails.
 - Many read-style bound methods **log with `fmt.Println` and return empty slices** on DB error (e.g. `GetCategories`, `GetCommands` in `app.go`) instead of surfacing `error` to the frontend.
@@ -283,21 +304,26 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 ## Architecture
 
 ## Pattern Overview
-- **Thin binding layer:** `App` in `app.go` orchestrates `DB` and `Executor` without a separate service layer.
-- **Single-package Go backend:** Domain logic, persistence, execution, and script helpers live in `package main` across six `.go` files at the repository root.
+- **Service-per-concern backend:** Seven structs (`App`, `CommandService`, `ExecutionService`, `SettingsService`, `ImportExportService`, `EventService`, `TerminalService`) are each registered as an `application.Service` in `main.go` — no single monolithic `App` orchestrates everything.
+- **Flat `package main` at the repo root**, plus a separate `migrations` package: domain logic, persistence, execution, and script helpers live across the `*_service.go` files, `db.go`, `executor.go`, `script.go`, `models.go`, `pty_backend*.go`.
 - **Centralized React state:** `frontend/src/App.tsx` owns lists, tabs, modals, execution/output state, and coordinates child components.
-- **Push streaming for stdout/stderr:** Execution uses Go callbacks that emit Wails events; the frontend subscribes and batches lines for rendering.
+- **Push streaming for stdout/stderr:** Execution uses Go callbacks that emit Wails events (`wailsApp.Event.Emit`, e.g. `pty-output:<id>`); the frontend subscribes via `@wailsio/runtime`'s `Events.On` and batches lines for rendering.
 ## Layers
-- Purpose: Create `App`, configure native menus, embed `frontend/dist`, run Wails with lifecycle hooks.
+- Purpose: Create the app via `application.New(...)`, register all 7 services, configure native menus, embed `frontend/dist`, run with `app.Run()`.
 - Location: `main.go`
-- Contains: `//go:embed all:frontend/dist`, `wails.Run` options, menu callbacks that emit `open-settings`.
-- Depends on: Wails options, `App` from `app.go`
+- Contains: `//go:embed all:frontend/dist`, `application.New(application.Options{Services: [...]})`, menu callbacks that emit `open-settings`/`open-shortcuts`.
+- Depends on: `application`/`events` packages (`github.com/wailsapp/wails/v3/pkg/...`), all 7 service structs
 - Used by: OS / Wails runtime only
-- Purpose: Methods callable from TypeScript (`frontend/wailsjs/go/main/App.ts`); maps requests to DB and executor; emits events where needed.
+- Purpose: App-level lifecycle service — settings window management, `GetOS`, `PickDirectory`; holds package-level `db`/`executor`/`wailsApp` vars used by other services.
 - Location: `app.go`
-- Contains: Category/command CRUD, `GetScriptBody` / `GetScriptContent`, variable prompts (`GetVariables`), `RunCommand` / `RunInTerminal`, presets, settings, search, `ResetAllData`, lifecycle `startup` / `shutdown`.
-- Depends on: `DB` (`db.go`), `Executor` (`executor.go`), `models.go`, `script.go` (`ParseScriptBody`, `ReplaceTemplateVars`, etc.), Wails `runtime` for `EventsEmit` and `LogFatal`
-- Used by: React via generated bindings; `main.go` holds a reference for menu events
+- Contains: `ServiceStartup`/`ServiceShutdown` (DB + executor init/teardown), `ShowSettingsWindow`, `GetOS`, `PickDirectory`
+- Depends on: `DB` (`db.go`), `Executor` (`executor.go`), Wails `application` package for the settings `WebviewWindow`
+- Used by: React via generated bindings (`frontend/bindings/cmdex/app.js`); `main.go` holds a reference for menu events
+- Purpose: Category/command CRUD, presets, search — split out of the old monolithic `App` into `CommandService`, `ExecutionService`, `SettingsService`, `ImportExportService`, `EventService`.
+- Location: `command_service.go`, `execution_service.go`, `settings_service.go`, `importexport_service.go`, `event_service.go`
+- Contains: `GetScriptBody`/`GetScriptContent`, `GetVariables`/`RunCommand`, `GetSettings`/`SetSettings`, import/export, `GetEventNames`
+- Depends on: `DB` (`db.go`), `Executor` (`executor.go`), `models.go`, `script.go` (`ParseScriptBody`, `ReplaceTemplateVars`, etc.), `wailsApp.Event.Emit` for events
+- Used by: React via generated bindings under `frontend/bindings/cmdex/<servicename>.js`
 - Purpose: SQLite access, schema, migrations, FTS5 search, CRUD for all entities.
 - Location: `db.go`
 - Contains: `DB` struct, `schemaVersion` / `migrate()`, queries, `SearchCommands` against `commands_fts`.
@@ -321,11 +347,11 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Purpose: UI, tabbed editor, modals, keyboard shortcuts, i18n, calls to Go and event subscriptions.
 - Location: `frontend/src/` (root component `App.tsx`)
 - Contains: Feature components under `components/`, shared hooks (`hooks/useKeyboardShortcuts.ts`), utilities (`utils/tabDraft.ts`, `utils/templateVars.ts`), path alias `@/` → `src/`
-- Depends on: Generated `frontend/wailsjs/go/main/App`, `frontend/wailsjs/runtime/runtime`, `i18next`, Radix/shadcn-style UI under `components/ui/`
+- Depends on: Generated `frontend/bindings/cmdex/<servicename>.js`, `@wailsio/runtime` (`Events`, etc.), `i18next`, Radix/shadcn-style UI under `components/ui/`
 - Used by: End user
-- Purpose: TypeScript/JavaScript stubs for Go methods and Wails runtime.
-- Location: `frontend/wailsjs/go/main/App.*`, `frontend/wailsjs/runtime/*`
-- Regenerated by: `wails generate module` or `wails dev` (per `CLAUDE.md`)
+- Purpose: JavaScript stubs (with JSDoc types) for Go service methods and Wails runtime models.
+- Location: `frontend/bindings/cmdex/*.js`
+- Regenerated by: `wails3 generate bindings` or `wails3 dev` (also happens automatically as part of `wails3 build`/`task build`)
 ## Data Flow
 - **Global UI state:** React `useState` / `useRef` / `useCallback` in `App.tsx` — categories, commands, active tab, modal union `ModalState`, execution flags, stream buffers.
 - **Per-tab output and pane layout:** Refs such as `tabOutputRef` and `tabPaneStateRef` in `App.tsx` (documented in `CLAUDE.md`) so tab switches do not lose output or pane visibility without forcing full re-render loops.
@@ -350,13 +376,13 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 ## Entry Points
 - Location: `main.go`
 - Triggers: Executable launch
-- Responsibilities: `embed` frontend assets, `NewApp()`, build menu, `wails.Run` with `Bind: []interface{}{app}`
+- Responsibilities: `embed` frontend assets, `application.New(application.Options{Services: [...]})`, build native menu, `app.Run()`
 - Location: `frontend/src/main.tsx`
 - Triggers: Wails loading `index.html` / Vite dev server
 - Responsibilities: `createRoot`, import `i18n` and `style.css`, render `<App />`
-- Location: `wails.json`
-- Triggers: Wails CLI (`dev`, `build`, `generate`)
-- Responsibilities: Project name, frontend pnpm commands, output binary name
+- Location: `build/config.yml`
+- Triggers: Wails CLI (`wails3 dev`, `wails3 build`, `wails3 generate bindings`)
+- Responsibilities: App metadata (name, identifier, version), dev-mode file watching config. (`wails.json` at the repo root is a stale Wails v2 file, not read by v3.)
 ## Error Handling
 - `CreateCommand` / `UpdateCommand` / preset APIs return `(T, error)` to the frontend.
 - `GetCategories`, `GetCommands`, `GetExecutionHistory`, `SearchCommands` swallow errors internally and return `[]` on failure (`app.go`).
