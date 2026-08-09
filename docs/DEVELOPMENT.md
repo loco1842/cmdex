@@ -229,7 +229,7 @@ Main window dimensions, title, background color, and macOS-specific options are 
 ### Go
 
 - Standard Go formatting. Run `make fmt` (`golangci-lint fmt`) before committing; it rewrites files in place using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`).
-- `make lint` (`golangci-lint run || true`, using `.golangci.yml`) reports style/correctness issues — same config CI runs (advisory there too, via `continue-on-error: true`). The `|| true` keeps `make lint` non-blocking, since golangci-lint exits non-zero on findings. Not wired into `make check`.
+- `make lint` (`golangci-lint run`, using `.golangci.yml`) reports style/correctness issues — same config CI runs, and both fail the run on any finding. Not wired into `make check`.
 - Services are named `XxxService` with exported methods in PascalCase.
 - Errors are wrapped with `fmt.Errorf("...: %w", err)`.
 - Database access is centralized in `db.go`; services call `db.*` rather than issuing SQL directly.
@@ -268,7 +268,7 @@ The project uses Tailwind v4 with the new `@tailwindcss/vite` plugin. Styles are
 | `make generate` | Alias for `wails3 generate bindings` |
 | `make check` | Compile Go + type-check TypeScript |
 | `make fmt` | Rewrite Go files with `golangci-lint fmt` (`goimports` + `golines`) |
-| `make lint` | Run `golangci-lint run` (advisory, non-blocking — same config CI uses) |
+| `make lint` | Run `golangci-lint run` (blocking — same config CI uses; fails on findings) |
 | `make test` | Run Go tests (`go test ./...`), then the frontend Playwright e2e suite |
 | `make clean` | Remove `bin/` and `frontend/dist`, then restore the tracked `frontend/dist/.gitkeep` placeholder |
 

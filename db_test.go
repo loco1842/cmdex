@@ -142,10 +142,7 @@ func TestUpdateCommandCategoryChange(t *testing.T) {
 		t.Fatalf("create command: %v", err)
 	}
 
-	// Regression test for a bug where UpdateCommand's second BeginTx (taken
-	// when the category changes) reassigned the tx variable closed over by
-	// the first deferred rollback; a nil-tx path would panic instead of
-	// erroring cleanly. Exercise the full category-change flow end-to-end.
+	// Category change must reindex via UpdateCommandPosition, then update fields.
 	cmd.Title = sql.NullString{String: "updated", Valid: true}
 	cmd.CategoryID = catB.ID
 	cmd.UpdatedAt = time.Now()

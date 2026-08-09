@@ -439,13 +439,11 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 	_ = rows.Close() //nolint:sqlclosecheck // see comment above the query
 
 	for _, importedCmd := range commands {
-		// Determine category ID
-		var categoryID *string
+		catID := ""
 		if importedCmd.CategoryName != "" {
-			if catID, exists := categoryMap[importedCmd.CategoryName]; exists {
-				categoryID = &catID
+			if existing, exists := categoryMap[importedCmd.CategoryName]; exists {
+				catID = existing
 			} else {
-				// Create new category
 				newCatID := uuid.New().String()
 				now := time.Now()
 				_, err := tx.ExecContext(context.Background(),
@@ -455,32 +453,17 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 				if err != nil {
 					return fmt.Errorf("create category: %w", err)
 				}
-				categoryID = &newCatID
+				catID = newCatID
 				categoryMap[importedCmd.CategoryName] = newCatID
 			}
 		}
 
-		// Create command
 		cmdID := uuid.New().String()
 		now := time.Now()
 
-		var catIDPtr any
-		if categoryID != nil {
-			catIDPtr = nullableString(*categoryID)
-		}
-
-		var titlePtr, descPtr any
-		if importedCmd.Title != "" {
-			titlePtr = importedCmd.Title
-		}
-		if importedCmd.Description != "" {
-			descPtr = importedCmd.Description
-		}
-
-		// Get max position in category
 		var maxPos int
-		if categoryID != nil {
-			_ = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", *categoryID).
+		if catID != "" {
+			_ = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", catID).
 				Scan(&maxPos)
 		} else {
 			_ = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").
@@ -497,10 +480,10 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 			`INSERT INTO commands (id, title, description, script_content, category_id, position, created_at, updated_at, working_dir)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			cmdID,
-			titlePtr,
-			descPtr,
+			nullableString(importedCmd.Title),
+			nullableString(importedCmd.Description),
 			importedCmd.ScriptContent,
-			catIDPtr,
+			nullableString(catID),
 			maxPos+1,
 			now,
 			now,
@@ -737,86 +720,44 @@ func (db *DB) CreateCommand(cmd Command) error {
 }
 
 func (db *DB) UpdateCommand(cmd Command) error {
+	var oldCategoryID sql.NullString
+	err := db.conn.QueryRowContext(context.Background(), "SELECT category_id FROM commands WHERE id = ?", cmd.ID).
+		Scan(&oldCategoryID)
+	if err != nil {
+		return fmt.Errorf("get existing command: %w", err)
+	}
+
+	// Category moves need reindexing; do that first, then update the remaining fields.
+	if oldCategoryID.String != cmd.CategoryID {
+		if err := db.UpdateCommandPosition(cmd.ID, cmd.CategoryID, appendToEndPosition); err != nil {
+			return err
+		}
+	}
+
 	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Fetch existing command to check if category_id changed
-	var oldCategoryID sql.NullString
-	err = tx.QueryRowContext(context.Background(), "SELECT category_id FROM commands WHERE id = ?", cmd.ID).
-		Scan(&oldCategoryID)
-	if err != nil {
-		return fmt.Errorf("get existing command: %w", err)
-	}
-
-	// Determine if category changed
-	oldCat := oldCategoryID.String
-	newCat := cmd.CategoryID
-	categoryChanged := oldCat != newCat
-
-	// If category changed, route through UpdateCommandPosition logic
-	if categoryChanged {
-		// Rollback this transaction and use UpdateCommandPosition instead for the move
-		_ = tx.Rollback()
-
-		// Use UpdateCommandPosition to handle the category move with proper reindexing
-		// Append to end of new category (position = len of target category)
-		if err := db.UpdateCommandPosition(cmd.ID, newCat, appendToEndPosition); err != nil {
-			return err
-		}
-
-		// Now open a new transaction to update the other fields. Assign
-		// through a temporary so tx is never set to nil on failure — the
-		// deferred rollback above closes over the tx variable itself, and a
-		// nil tx would panic on Rollback when this function returns early.
-		newTx, err := db.conn.BeginTx(context.Background(), nil)
-		if err != nil {
-			return fmt.Errorf("begin tx after position update: %w", err)
-		}
-		tx = newTx
-	}
-
 	workingDirJSON, err := json.Marshal(cmd.WorkingDir)
 	if err != nil {
 		return fmt.Errorf("marshal working_dir: %w", err)
 	}
 
-	// Update all fields except category_id and position (those are handled by UpdateCommandPosition if changed)
-	var updateErr error
-	if categoryChanged {
-		// Category already updated by UpdateCommandPosition, so skip it
-		_, updateErr = tx.ExecContext(
-			context.Background(),
-			"UPDATE commands SET title = ?, description = ?, script_content = ?, updated_at = ?, working_dir = ? WHERE id = ?",
-			nullableNullString(
-				cmd.Title,
-			),
-			nullableNullString(cmd.Description),
-			cmd.ScriptContent,
-			cmd.UpdatedAt,
-			string(workingDirJSON),
-			cmd.ID,
-		)
-	} else {
-		// Category didn't change, safe to update everything
-		_, updateErr = tx.ExecContext(
-			context.Background(),
-			"UPDATE commands SET title = ?, description = ?, script_content = ?, category_id = ?, updated_at = ?, working_dir = ? WHERE id = ?",
-			nullableNullString(
-				cmd.Title,
-			),
-			nullableNullString(cmd.Description),
-			cmd.ScriptContent,
-			nullableString(cmd.CategoryID),
-			cmd.UpdatedAt,
-			string(workingDirJSON),
-			cmd.ID,
-		)
-	}
-	if updateErr != nil {
-		return fmt.Errorf("update command: %w", updateErr)
+	_, err = tx.ExecContext(
+		context.Background(),
+		"UPDATE commands SET title = ?, description = ?, script_content = ?, category_id = ?, updated_at = ?, working_dir = ? WHERE id = ?",
+		nullableNullString(cmd.Title),
+		nullableNullString(cmd.Description),
+		cmd.ScriptContent,
+		nullableString(cmd.CategoryID),
+		cmd.UpdatedAt,
+		string(workingDirJSON),
+		cmd.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update command: %w", err)
 	}
 
 	// Replace tags

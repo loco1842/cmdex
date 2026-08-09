@@ -8,7 +8,7 @@ CmDex exposes its backend through Wails v3 **service method bindings** and **run
 
 ## Wails Service Architecture
 
-The Go backend registers six services, each scoped to a domain:
+The Go backend registers seven services, each scoped to a domain:
 
 | Service | Go Struct | Frontend Module | Purpose |
 |---|---|---|---|
@@ -18,6 +18,7 @@ The Go backend registers six services, each scoped to a domain:
 | SettingsService | `SettingsService` | `settingsservice.js` | User preferences, terminal detection |
 | ImportExportService | `ImportExportService` | `importexportservice.js` | Command import/export, theme template export |
 | EventService | `EventService` | `eventservice.js` | Event name constants for type-safe event handling |
+| TerminalService | `TerminalService` | `terminalservice.js` | Multi-session PTY-backed terminals |
 
 Every service method returns a `CancellablePromise<T>` (from `@wailsio/runtime`). On error, the promise rejects — there is no explicit error return in the TypeScript signature.
 
