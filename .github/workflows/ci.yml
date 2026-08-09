@@ -38,7 +38,7 @@ jobs:
           cache: true
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
           run_install: false
@@ -53,7 +53,7 @@ jobs:
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-${{ env.PNPM_VERSION }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -70,7 +70,7 @@ jobs:
         run: pnpm lint
 
       - name: Cache Linux apt deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/apt-cache-type
           key: apt-type-${{ runner.os }}-${{ hashFiles('.github/apt-packages.txt') }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Cache Go bin
         id: cache-gobin
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/go/bin
           key: gobin-typecheck-${{ runner.os }}-${{ env.WAILS_VERSION }}
@@ -137,7 +137,7 @@ jobs:
           cache: true
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
           run_install: false
@@ -152,7 +152,7 @@ jobs:
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-${{ env.PNPM_VERSION }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -165,7 +165,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache Linux apt deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/apt-cache-test
           key: apt-test-${{ runner.os }}-${{ hashFiles('.github/apt-packages.txt') }}
@@ -191,7 +191,7 @@ jobs:
 
       - name: Cache Go bin
         id: cache-gobin
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/go/bin
           key: gobin-test-${{ runner.os }}-${{ env.WAILS_VERSION }}
@@ -218,7 +218,7 @@ jobs:
 
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
@@ -249,7 +249,7 @@ jobs:
           cache: true
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
           run_install: false
@@ -264,7 +264,7 @@ jobs:
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-${{ env.PNPM_VERSION }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -273,14 +273,14 @@ jobs:
             ${{ runner.os }}-pnpm-
 
       - name: Install Task
-        uses: arduino/setup-task@v2
+        uses: arduino/setup-task@v3
         with:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Linux apt deps
         if: runner.os == 'Linux'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/apt-cache
           key: apt-build-${{ matrix.os }}-${{ hashFiles('.github/apt-packages.txt') }}
@@ -301,7 +301,7 @@ jobs:
       - name: Cache Windows NSIS
         if: runner.os == 'Windows'
         id: cache-nsis
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: C:\Program Files (x86)\NSIS
           key: nsis-${{ runner.os }}
@@ -324,7 +324,7 @@ jobs:
 
       - name: Cache Go bin
         id: cache-gobin
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/go/bin
           key: gobin-build-${{ runner.os }}-${{ env.WAILS_VERSION }}
