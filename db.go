@@ -463,11 +463,14 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 
 		var maxPos int
 		if catID != "" {
-			_ = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", catID).
+			err = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id = ?", catID).
 				Scan(&maxPos)
 		} else {
-			_ = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").
+			err = tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(position), -1) FROM commands WHERE category_id IS NULL OR category_id = ''").
 				Scan(&maxPos)
+		}
+		if err != nil {
+			return fmt.Errorf("query max position: %w", err)
 		}
 
 		workingDirJSON, err := json.Marshal(importedCmd.WorkingDir)
@@ -727,18 +730,18 @@ func (db *DB) UpdateCommand(cmd Command) error {
 		return fmt.Errorf("get existing command: %w", err)
 	}
 
-	// Category moves need reindexing; do that first, then update the remaining fields.
-	if oldCategoryID.String != cmd.CategoryID {
-		if err := db.UpdateCommandPosition(cmd.ID, cmd.CategoryID, appendToEndPosition); err != nil {
-			return err
-		}
-	}
-
 	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Category moves need reindexing; share this tx with the field/tag/var writes below.
+	if oldCategoryID.String != cmd.CategoryID {
+		if err := db.updateCommandPositionTx(tx, cmd.ID, cmd.CategoryID, appendToEndPosition); err != nil {
+			return err
+		}
+	}
 
 	workingDirJSON, err := json.Marshal(cmd.WorkingDir)
 	if err != nil {
@@ -840,8 +843,19 @@ func (db *DB) UpdateCommandPosition(id string, newCategoryID string, newIndex in
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := db.updateCommandPositionTx(tx, id, newCategoryID, newIndex); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// updateCommandPositionTx is the transactional core of UpdateCommandPosition.
+// Callers that already hold a transaction (e.g. UpdateCommand) use this so the
+// category move shares the same commit/rollback path as later writes.
+func (db *DB) updateCommandPositionTx(tx *sql.Tx, id string, newCategoryID string, newIndex int) error {
 	// Fetch all commands in the target category, excluding the moving one
 	var rows *sql.Rows
+	var err error
 	if newCategoryID == "" {
 		rows, err = tx.QueryContext(context.Background(),
 			"SELECT id FROM commands WHERE (category_id IS NULL OR category_id = '') AND id != ? ORDER BY position ASC",
@@ -901,7 +915,7 @@ func (db *DB) UpdateCommandPosition(id string, newCategoryID string, newIndex in
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (db *DB) saveTags(tx *sql.Tx, commandID string, tags []string) error {

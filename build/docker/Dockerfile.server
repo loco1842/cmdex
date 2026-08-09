@@ -1,22 +1,24 @@
 # Wails Server Mode Dockerfile
-# Multi-stage build for a minimal image.
+# Multi-stage build for a minimal image that can still execute user scripts.
 #
-# Defaults produce a pure-Go, fully static binary on a distroless/static base:
-# the smallest, most secure image, and correct for the default (CGO-free) app.
+# Defaults produce a pure-Go, fully static binary on a slim Debian runtime that
+# includes /bin/bash (and the usual shell utilities scripts need). Distroless
+# images are intentionally not used — this app's purpose is running
+# user-supplied bash, so the runtime must ship a shell.
 #
 # If your app needs CGO, override the build args, e.g.:
 #   docker build --build-arg CGO_ENABLED=1 \
 #                --build-arg GO_IMAGE=golang:bookworm \
-#                --build-arg RUNTIME_IMAGE=gcr.io/distroless/base-debian12:nonroot \
+#                --build-arg RUNTIME_IMAGE=debian:bookworm-slim \
 #                -f build/docker/Dockerfile.server .
 # CGO needs a C toolchain in the builder and a libc in the runtime image; keep
 # the builder and runtime libc compatible (a glibc builder -> a glibc runtime).
-# Keep the ":nonroot" tag on any RUNTIME_IMAGE override too — this app's whole
-# purpose is executing user-supplied bash, so it must not run as root.
-# The Taskfile passes these through: task build:docker CGO_ENABLED=1 GO_IMAGE=... RUNTIME_IMAGE=...
+# The image still runs as non-root via USER below — keep that when overriding
+# RUNTIME_IMAGE. The Taskfile passes these through:
+#   task build:docker CGO_ENABLED=1 GO_IMAGE=... RUNTIME_IMAGE=...
 
 ARG GO_IMAGE=golang:1.26-alpine
-ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG CGO_ENABLED=0
 
 # Build stage
@@ -36,15 +38,40 @@ RUN if command -v apk >/dev/null 2>&1; then \
 # Copy source code
 COPY . .
 
-# Remove local replace directives if present (for production builds). Handles
-# both single-line (`replace foo => bar`) and block-form (`replace (\n...\n)`)
-# directives so a block doesn't leave an orphaned body + ")" behind.
+# Remove only local-path replace directives (./, ../, or absolute /…), for
+# production builds. Preserves module→module replacements. Handles both
+# single-line (`replace foo => ./bar`) and block-form (`replace (\n...\n)`)
+# so a block doesn't leave an orphaned body, empty replace (), or ")" behind.
 RUN awk '\
-        /^replace[[:space:]]*\(/ { skip=1; next } \
-        skip && /^\)/            { skip=0; next } \
-        skip                      { next } \
-        /^replace[[:space:]]/    { next } \
-        { print } \
+    function is_local(p) { return (p ~ /^\.\// || p ~ /^\.\.\// || p ~ /^\//) } \
+    function after_arrow(line,   idx, rest, n, a) { \
+        idx = index(line, "=>"); \
+        if (idx == 0) return ""; \
+        rest = substr(line, idx + 2); \
+        gsub(/^[[:space:]]+/, "", rest); \
+        n = split(rest, a, /[[:space:]]+/); \
+        if (n < 1) return ""; \
+        return a[1]; \
+    } \
+    /^replace[[:space:]]*\(/ { \
+        inblock = 1; kept = 0; buf = ""; next \
+    } \
+    inblock && /^[[:space:]]*\)[[:space:]]*$/ { \
+        if (kept) { print "replace ("; printf "%s", buf; print ")" } \
+        inblock = 0; next \
+    } \
+    inblock { \
+        if ($0 ~ /^[[:space:]]*$/) next; \
+        rhs = after_arrow($0); \
+        if (rhs != "" && is_local(rhs)) next; \
+        buf = buf $0 "\n"; kept = 1; next \
+    } \
+    /^replace[[:space:]]/ { \
+        rhs = after_arrow($0); \
+        if (rhs != "" && is_local(rhs)) next; \
+        print; next \
+    } \
+    { print } \
     ' go.mod > go.mod.tmp && mv go.mod.tmp go.mod
 
 # Download dependencies, verified against the committed go.sum (reproducible;
@@ -55,11 +82,11 @@ RUN go mod download
 # Build the production server binary.
 # - server,production tags: HTTP server mode with production code paths (no dev
 #   logger/asset middleware), matching the desktop production build.
-# - CGO_ENABLED defaults to 0 for a fully static binary (distroless/static);
+# - CGO_ENABLED defaults to 0 for a fully static binary;
 #   override with --build-arg CGO_ENABLED=1 (see header) for CGO apps.
 RUN CGO_ENABLED=${CGO_ENABLED} go build -tags server,production -trimpath -buildvcs=false -ldflags="-s -w" -o server .
 
-# Runtime stage - minimal image
+# Runtime stage — slim Debian with bash for user-script execution
 FROM ${RUNTIME_IMAGE}
 
 # Copy the binary
@@ -75,9 +102,9 @@ EXPOSE 8080
 # Can be overridden at runtime with -e WAILS_SERVER_HOST=...
 ENV WAILS_SERVER_HOST=0.0.0.0
 
-# Run as non-root. Numeric UID:GID (not the "nonroot" name) so this still
-# resolves even if RUNTIME_IMAGE is overridden to an image without a
-# "nonroot" passwd entry — 65532 is the distroless "nonroot" convention.
+# Run as non-root. Numeric UID:GID (not a username) so this still resolves
+# even if RUNTIME_IMAGE has no matching passwd entry — 65532 matches the
+# common nonroot convention.
 USER 65532:65532
 
 # Run the server

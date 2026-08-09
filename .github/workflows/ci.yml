@@ -73,9 +73,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/apt-cache-type
-          key: apt-type-${{ runner.os }}-${{ hashFiles('.github/apt-packages.txt') }}
+          key: apt-type-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/apt-packages.txt') }}
           restore-keys: |
-            apt-type-${{ runner.os }}-
+            apt-type-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Linux build deps
         shell: bash
@@ -104,7 +104,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/go/bin
-          key: gobin-typecheck-${{ runner.os }}-${{ env.WAILS_VERSION }}
+          key: gobin-typecheck-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS_VERSION }}
 
       - name: Add Go bin to PATH
         shell: bash
@@ -168,9 +168,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/apt-cache-test
-          key: apt-test-${{ runner.os }}-${{ hashFiles('.github/apt-packages.txt') }}
+          key: apt-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/apt-packages.txt') }}
           restore-keys: |
-            apt-test-${{ runner.os }}-
+            apt-test-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Linux build deps
         shell: bash
@@ -194,7 +194,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/go/bin
-          key: gobin-test-${{ runner.os }}-${{ env.WAILS_VERSION }}
+          key: gobin-test-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS_VERSION }}
 
       - name: Add Go bin to PATH
         shell: bash
@@ -283,9 +283,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/apt-cache
-          key: apt-build-${{ matrix.os }}-${{ hashFiles('.github/apt-packages.txt') }}
+          key: apt-build-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('.github/apt-packages.txt') }}
           restore-keys: |
-            apt-build-${{ matrix.os }}-
+            apt-build-${{ matrix.os }}-${{ runner.arch }}-
 
       - name: Install Linux build deps
         if: runner.os == 'Linux'
@@ -327,7 +327,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/go/bin
-          key: gobin-build-${{ runner.os }}-${{ env.WAILS_VERSION }}
+          key: gobin-build-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS_VERSION }}
 
       - name: Add Go bin to PATH
         shell: bash

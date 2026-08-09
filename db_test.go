@@ -130,6 +130,18 @@ func TestUpdateCommandCategoryChange(t *testing.T) {
 		t.Fatalf("create category B: %v", err)
 	}
 
+	existingInB := Command{
+		ID:            "cmd-b-existing",
+		Title:         sql.NullString{String: "already in B", Valid: true},
+		ScriptContent: "echo existing",
+		CategoryID:    catB.ID,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if err := db.CreateCommand(existingInB); err != nil {
+		t.Fatalf("create existing command in B: %v", err)
+	}
+
 	cmd := Command{
 		ID:            "cmd-1",
 		Title:         sql.NullString{String: "original", Valid: true},
@@ -159,6 +171,10 @@ func TestUpdateCommandCategoryChange(t *testing.T) {
 	}
 	if got.Title.String != "updated" {
 		t.Errorf("Title = %q, want %q", got.Title.String, "updated")
+	}
+	// Appended after the existing command in catB (positions are 0-indexed).
+	if got.Position != 1 {
+		t.Errorf("Position = %d, want 1 (after existing command in B)", got.Position)
 	}
 }
 
