@@ -115,10 +115,10 @@ CmDex registers six Wails v3 services in `main.go`:
 
 ### Application Entry (`main.tsx`)
 
-The frontend is a single Vite bundle that renders two distinct UIs based on the URL:
+The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the build prefers a **simple bundle** (no vendor code-splitting for size warnings) and only lazy-loads heavy entry points / features (e.g. `App` vs `SettingsPage`, and the xterm `Terminal`). It renders two UIs based on the URL:
 
-- **Main Window** (`/` or no query param) — Renders the primary `<App />` component.
-- **Settings Window** (`/?window=settings`) — Renders a dedicated `<SettingsWindow />` component that loads and persists preferences independently, then emits `settingsChanged` events back to the main window.
+- **Main Window** (`/` or no query param) — Lazily loads the primary `<App />` component.
+- **Settings Window** (`/?window=settings`) — Lazily loads `<SettingsPage />` inside a dedicated settings window that persists preferences independently, then emits `settingsChanged` events back to the main window.
 
 ### Main App Structure (`App.tsx`)
 

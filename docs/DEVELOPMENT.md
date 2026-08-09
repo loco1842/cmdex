@@ -119,6 +119,14 @@ The dev server runs on the port defined by `VITE_PORT` (default `9245`). When la
 import { Button } from '@/components/ui/button';
 ```
 
+### Production Bundle (Desktop)
+
+Wails loads frontend assets from the local embed/asset server, not the network. Prefer a **simple bundle** over web-style vendor chunking:
+
+- Do **not** add Vite `codeSplitting` / vendor `manualChunks` just to silence size warnings.
+- `chunkSizeWarningLimit` is raised to `1500` in `frontend/vite.config.ts` — a ~1MB main chunk is fine for desktop.
+- Lazy-load only heavy features that are not needed at first paint (e.g. `Terminal` / xterm in `App.tsx`; `App` vs `SettingsPage` entry points in `main.tsx`).
+
 ---
 
 ## 4. Backend Development

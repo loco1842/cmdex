@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, lazy } from 'react'
 import {createRoot} from 'react-dom/client'
 import './i18n'
 import './style.css'
-import App from './App'
-import SettingsPage from './components/SettingsPage'
 import { GetSettings, SetSettings } from '../bindings/cmdex/settingsservice'
 import { THEMES, type CustomTheme } from './types'
 import { Events } from '@wailsio/runtime'
 import { eventNames } from './wails/events'
 import { toast } from 'sonner'
 import { applyTheme, applyDensity, applyFonts } from './lib/theme-apply'
+
+const App = lazy(() => import('./App'))
+const SettingsPage = lazy(() => import('./components/SettingsPage'))
 
 const container = document.getElementById('root')
 
@@ -154,13 +155,17 @@ if (isSettingsWindow) {
 
     root.render(
         <React.StrictMode>
-            <SettingsWindow />
+            <React.Suspense fallback={null}>
+                <SettingsWindow />
+            </React.Suspense>
         </React.StrictMode>
     )
 } else {
     root.render(
         <React.StrictMode>
-            <App/>
+            <React.Suspense fallback={null}>
+                <App/>
+            </React.Suspense>
         </React.StrictMode>
     )
 }

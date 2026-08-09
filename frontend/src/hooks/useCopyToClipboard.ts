@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { copyText } from '../utils/clipboard';
 
 export function useCopyToClipboard(resetMs = 1500) {
   const [copied, setCopied] = useState(false);
@@ -6,7 +7,7 @@ export function useCopyToClipboard(resetMs = 1500) {
 
   const copy = useCallback(async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setCopied(true);
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), resetMs);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import './style.css';
 import { useSyncedRef } from './hooks/useSyncedRef';
@@ -6,7 +6,7 @@ import { useResizable } from './hooks/useResizable';
 import Sidebar from './components/Sidebar';
 import CategoryEditor from './components/CategoryEditor';
 import VariablePrompt from './components/VariablePrompt';
-import TerminalComponent, { type TerminalHandle } from './components/Terminal';
+import type { TerminalHandle } from './components/Terminal';
 import ResizablePanel from './components/ResizablePanel';
 import TabBar, { type Tab } from './components/TabBar';
 import TerminalTabBar from './components/TerminalTabBar';
@@ -87,8 +87,11 @@ import {
     makePlaceholderCommand,
 } from './utils/tabDraft';
 import { buildVariablesFromScript, variableDefinitionsToPrompts } from './utils/templateVars';
+import { copyText } from './utils/clipboard';
 import { MainLogo } from './assets/images/main-logo';
 import { applyTheme, applyDensity, applyFonts } from './lib/theme-apply';
+
+const TerminalComponent = lazy(() => import('./components/Terminal'));
 
 type ModalState =
     | { type: 'none' }
@@ -1597,13 +1600,13 @@ function App() {
                                         onClick={() => {
                                             const ref = terminalRefs.current[activeSessionId];
                                             const output = ref?.getLastOutput() || '';
-                                            if (output) {
-                                                navigator.clipboard.writeText(output).then(() => {
-                                                    toast.success('Output copied');
-                                                }).catch(() => {
-                                                    toast.error('Failed to copy');
-                                                });
-                                            }
+                                            if (!output) return;
+                                            copyText(output).then(() => {
+                                                toast.success('Output copied');
+                                            }).catch((e) => {
+                                                console.error('Failed to copy:', e);
+                                                toast.error('Failed to copy');
+                                            });
                                         }}
                                         aria-label="Copy terminal output"
                                         title="Copy last command output"
@@ -1621,6 +1624,7 @@ function App() {
                                     : { height: terminalHeight, minHeight: MIN_TERM_HEIGHT, maxHeight: maxTermHeight }
                                 }
                             >
+                                <Suspense fallback={null}>
                                 {/* eslint-disable-next-line react-hooks/refs -- intentional: terminalOrderRef tracks stable iteration order; pair with setSessions() updates to trigger re-render */}
                                 {terminalOrderRef.current.map((id) => {
                                     const session = sessions.find(s => s.id === id);
@@ -1651,6 +1655,7 @@ function App() {
                                         />
                                     );
                                 })}
+                                </Suspense>
                                 {terminalCollapsed && (
                                     <button
                                         className="terminal-collapsed-rail"
