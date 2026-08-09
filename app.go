@@ -48,7 +48,7 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 // ServiceShutdown closes the database connection if non-nil.
 func (a *App) ServiceShutdown() error {
 	if db != nil {
-		_ = db.Close()
+		return db.Close()
 	}
 	return nil
 }

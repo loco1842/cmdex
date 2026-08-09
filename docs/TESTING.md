@@ -247,17 +247,14 @@ cd frontend && pnpm test
 
 ### Updating CI to Run Tests
 
-Add test steps to `.github/workflows/ci.yml` after the existing build/typecheck jobs:
+Go tests and Playwright e2e already run via the `test` job. Once Vitest is configured for frontend unit tests, add a step to that same job:
 
 ```yaml
-- name: Go tests
-  run: go test ./...
-
-- name: Frontend tests
+- name: Frontend unit tests
   run: cd frontend && pnpm test
 ```
 
-For the `build-check` job, you may also want to run `go test ./...` on each OS matrix to catch platform-specific behavior in `executor.go`.
+You may also want to run `go test ./...` on each OS in the `build-check` matrix to catch platform-specific behavior in `executor.go` (the `test` job only runs on `ubuntu-24.04`).
 
 ## 6. Test Framework and Setup
 
@@ -394,23 +391,21 @@ test: {
 
 ### Current CI Pipeline
 
-Test execution is **not currently part of the CI pipeline**. The CI configuration lives at `.github/workflows/ci.yml` and consists of two jobs:
+Test execution **is part of the CI pipeline**, via a dedicated `test` job. The CI configuration lives at `.github/workflows/ci.yml` and consists of three jobs:
 
 | Job | Trigger | What It Does |
 |-----|---------|--------------|
-| `typecheck` | push/PR to `main` | Lint frontend, `go build ./...`, generate Wails bindings, `tsc --noEmit` |
+| `typecheck` | push/PR to `main` | Lint frontend, `go build ./...`, `golangci-lint`, generate Wails bindings, `tsc --noEmit` |
+| `test` | push/PR to `main` | `go test ./...` and the frontend Playwright e2e suite (`pnpm test:e2e`); blocks the run on failure |
 | `build-check` | push/PR to `main` | Cross-platform build via `task build` on ubuntu-24.04, macos-latest, windows-latest |
 
 **Key CI details:**
 - Wails CLI version: `v3.0.0-beta.5` (pinned via `WAILS_VERSION` env var in CI)
 - Go version: read from `go.mod` (currently `1.26.0`)
-- Node version: `25`
+- Node version: `24` (pinned via `NODE_VERSION` env var in CI)
 - Package manager: `pnpm` (latest via `pnpm/action-setup@v5`)
-- Frontend lint failures are non-blocking (`continue-on-error: true`)
+- `golangci-lint` and `pnpm lint` block the `typecheck` job on any finding
 
 ### Adding Tests to CI
 
-To integrate tests into the existing CI pipeline, add test steps to both jobs. See [Section 5 — Updating CI to Run Tests](#5-how-to-add-tests) for the YAML snippets. The recommended placement is:
-
-1. **`typecheck` job:** Add `go test ./...` after the Go build check step. Add `cd frontend && pnpm test` after the TypeScript check step (once Vitest is configured).
-2. **`build-check` job:** Add `go test ./...` to the OS matrix to catch platform-specific behavior in `executor.go` (terminal integration, shell invocation).
+Go tests and the Playwright e2e suite already run in the `test` job on every push/PR. What's still missing is frontend **unit** tests (Vitest is not yet configured — see [Section 5 — Updating CI to Run Tests](#5-how-to-add-tests)): once added, wire `cd frontend && pnpm test` into the `test` job alongside the existing steps.

@@ -410,7 +410,6 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		_ = s.ptyBackend.Kill(oldCmd)
 	}
 	ss.readerWg.Wait()
-	ss.readerWg.Wait()
 
 	handle, cmd, err := s.ptyBackend.Start(shellPath, shellFlag, rows, cols)
 

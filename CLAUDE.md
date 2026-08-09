@@ -134,8 +134,8 @@ The editor uses a tab-based interface (replaced modal `CommandEditor`):
 ## Gotchas
 
 - `category_id` in `commands` table is nullable (`NULL` = uncategorized). Use `nullableString()` helper when inserting/updating, and `sql.NullString` when scanning.
-- After changing Go structs or method signatures, delete `~/.cmdex/cmdex.db` if schema changed, or bump `schemaVersion` and add migration in `db.go`
-- Schema migrations must recreate tables (SQLite doesn't support `ALTER COLUMN`) — see v1->v2 migration pattern in `db.go`
+- After changing Go structs or method signatures, delete `~/.cmdex/cmdex.db` if schema changed, or add a new migration in the `migrations/` package (see Schema Migration Pattern below) — there is no `schemaVersion` constant in `db.go`; the applied version lives in the `schema_version` table and is driven by the ordered `Migrations` slice in `migrations/migration.go`
+- Schema migrations must recreate tables (SQLite doesn't support `ALTER COLUMN`) — see the migration pattern below
 - Schema migrations must be wrapped in transactions to prevent partial failures leaving DB inconsistent
 - `//go:embed all:frontend/dist` in `main.go` requires `frontend/dist` to exist and be non-empty, or `go build`/`go vet`/`go test`/`wails3 build` all fail with `pattern all:frontend/dist: no matching files found`. A tracked `frontend/dist/.gitkeep` placeholder keeps this working on a fresh checkout; `make clean` deletes and restores it. `wails3 build`/`wails3 dev` build the real frontend first so this only bites bare `go build`/`go test` invocations.
 - When changing script storage format, delete `~/.cmdex/cmdex.db` to reset
@@ -326,7 +326,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Used by: React via generated bindings under `frontend/bindings/cmdex/<servicename>.js`
 - Purpose: SQLite access, schema, migrations, FTS5 search, CRUD for all entities.
 - Location: `db.go`
-- Contains: `DB` struct, `schemaVersion` / `migrate()`, queries, `SearchCommands` against `commands_fts`.
+- Contains: `DB` struct, `runMigrations()`/`RollbackTo()` (running the ordered `migrations.Migrations` slice), queries, `SearchCommands` against `commands_fts`.
 - Depends on: `database/sql`, `modernc.org/sqlite`, `models.go` types
 - Used by: `app.go` exclusively
 - Purpose: Shebang wrapping/stripping, `{{var}}` detection, merge with manual variable definitions.
@@ -363,7 +363,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Pattern: Facade over store + executor; no interface indirection in-repo.
 - Purpose: Encapsulates connection string (WAL, foreign keys), migrations, and all SQL.
 - Examples: `db.go`
-- Pattern: Struct + methods; `schemaVersion` constant drives incremental migrations.
+- Pattern: Struct + methods; the ordered `migrations.Migrations` slice drives incremental migrations against the `schema_version` table.
 - Purpose: Shell selection (Windows vs Unix), script file lifecycle, subprocess I/O, CEL evaluation for defaults, terminal detection.
 - Examples: `executor.go`
 - Pattern: Stateless executor type constructed once in `startup`.

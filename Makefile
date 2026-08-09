@@ -1,4 +1,4 @@
-.PHONY: dev build generate check fmt lint test clean
+.PHONY: dev build generate check fmt lint lint-fix test clean
 
 dev:
 	wails3 dev
@@ -18,10 +18,10 @@ fmt:
 	golangci-lint fmt
 
 lint:
-	golangci-lint run || true
+	golangci-lint run
 
 lint-fix:
-	golangci-lint run --fix || true
+	golangci-lint run --fix
 
 test:
 	mkdir -p frontend/dist

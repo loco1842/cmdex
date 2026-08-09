@@ -9,7 +9,7 @@ This guide will walk you through setting up the Cmdex project for local developm
 Before you begin, make sure you have the following installed:
 
 - **Go** `>= 1.26.0`
-- **Node.js** `>= 25`
+- **Node.js** `>= 20.19.0 || >=22.13.0 || >=24`
 - **pnpm** (required for frontend dependencies)
 - **Wails v3 CLI** (`v3.0.0-beta.5`)
 - **Task** (optional, used by build scripts — install from [taskfile.dev](https://taskfile.dev))
@@ -95,7 +95,7 @@ No additional configuration is required to run the app locally. On first launch,
 
 All data is stored locally — no accounts, cloud services, or API keys are needed.
 
-The project includes pre-configured environment files (`.env` and `frontend/.env`) that set the application name and development server port — these are optional; `task dev`/`make dev` fall back to sane built-in defaults (port `9245`) even without them. You should not need to create or modify these for standard development.
+`.env` and `frontend/.env` are gitignored, optional, local-only files for overriding the development server port (`VITE_PORT`) — they do not exist on a fresh clone, and `task dev`/`make dev` fall back to sane built-in defaults (port `9245`) without them. The application name comes from `build/config.yml`'s `productName`, not these files. You should not need to create them for standard development.
 
 ## Common setup issues
 

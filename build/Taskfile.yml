@@ -158,17 +158,16 @@ tasks:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}}
 
   generate:icons:
-    summary: Generates Windows `.ico` and Mac `.icns` from an image; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` from a `.icon` file (skipped on other platforms).
+    summary: Generates Windows `.ico` and Mac `.icns` from an image. (Skips the `Assets.car`/Icon Composer path, which requires a committed `appicon.icon` bundle we don't have; darwin/Taskfile.yml already treats `Assets.car` as optional.)
     run: once
     dir: build
     sources:
       - "appicon.png"
-      - "appicon.icon"
     generates:
       - "darwin/icons.icns"
       - "windows/icon.ico"
     cmds:
-      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico -iconcomposerinput appicon.icon -macassetdir darwin
+      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
   dev:frontend:
     summary: Runs the frontend in development mode
@@ -249,7 +248,7 @@ tasks:
 
       Usage: task build:docker [TAG=myapp:latest] [CGO_ENABLED=1] [GO_IMAGE=...] [RUNTIME_IMAGE=...]
       For CGO apps, set CGO_ENABLED=1 with libc-compatible builder/runtime images, e.g.:
-        task build:docker CGO_ENABLED=1 GO_IMAGE=golang:bookworm RUNTIME_IMAGE=gcr.io/distroless/base-debian12
+        task build:docker CGO_ENABLED=1 GO_IMAGE=golang:bookworm RUNTIME_IMAGE=gcr.io/distroless/base-debian12:nonroot
     deps:
       # Build the production frontend so frontend/dist (embedded by the Go build
       # inside the image) is present and current in the Docker build context.
@@ -262,8 +261,8 @@ tasks:
       - >-
         docker build
         --build-arg CGO_ENABLED={{.CGO_ENABLED | default "0"}}
-        --build-arg GO_IMAGE={{.GO_IMAGE | default "golang:alpine"}}
-        --build-arg RUNTIME_IMAGE={{.RUNTIME_IMAGE | default "gcr.io/distroless/static-debian12"}}
+        --build-arg GO_IMAGE={{.GO_IMAGE | default "golang:1.26-alpine"}}
+        --build-arg RUNTIME_IMAGE={{.RUNTIME_IMAGE | default "gcr.io/distroless/static-debian12:nonroot"}}
         -t {{.TAG | default (printf "%s:latest" .APP_NAME)}}
         -f build/docker/Dockerfile.server .
     vars:

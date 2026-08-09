@@ -37,6 +37,9 @@ func NewDB() (*DB, error) {
 	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
+	if err := os.Chmod(dataDir, 0750); err != nil { //nolint:gosec // G302: 0750 is correct for a dir, not a file
+		return nil, fmt.Errorf("chmod data dir: %w", err)
+	}
 
 	dbPath := filepath.Join(dataDir, "cmdex.db")
 	conn, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=journal_mode(wal)")
@@ -155,10 +158,12 @@ func (db *DB) RollbackTo(targetVersion int) error {
 		return nil
 	}
 
-	// Iterate in reverse order
+	// Iterate in reverse order, only undoing migrations that are actually
+	// applied (targetVersion < m.Version <= currentVersion) — a migration
+	// with Version > currentVersion was never run and must not be rolled back.
 	for _, v := range slices.Backward(migrations.Migrations) {
 		m := v
-		if m.Version <= targetVersion {
+		if m.Version <= targetVersion || m.Version > currentVersion {
 			continue
 		}
 
@@ -461,7 +466,7 @@ func (db *DB) ImportCommands(commands []ImportCommandInput) error {
 
 		var catIDPtr any
 		if categoryID != nil {
-			catIDPtr = *categoryID
+			catIDPtr = nullableString(*categoryID)
 		}
 
 		var titlePtr, descPtr any
@@ -762,12 +767,15 @@ func (db *DB) UpdateCommand(cmd Command) error {
 			return err
 		}
 
-		// Now open a new transaction to update the other fields
-		tx, err = db.conn.BeginTx(context.Background(), nil)
+		// Now open a new transaction to update the other fields. Assign
+		// through a temporary so tx is never set to nil on failure — the
+		// deferred rollback above closes over the tx variable itself, and a
+		// nil tx would panic on Rollback when this function returns early.
+		newTx, err := db.conn.BeginTx(context.Background(), nil)
 		if err != nil {
 			return fmt.Errorf("begin tx after position update: %w", err)
 		}
-		defer func() { _ = tx.Rollback() }()
+		tx = newTx
 	}
 
 	workingDirJSON, err := json.Marshal(cmd.WorkingDir)
