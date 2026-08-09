@@ -267,7 +267,7 @@ The project uses Tailwind v4 with the new `@tailwindcss/vite` plugin. Styles are
 | `make check` | Compile Go + type-check TypeScript |
 | `make fmt` | Rewrite Go files with `golangci-lint fmt` (`goimports` + `golines`) |
 | `make lint` | Run `golangci-lint run` (advisory, non-blocking — same config CI uses) |
-| `make test` | Run the frontend Playwright e2e suite |
+| `make test` | Run Go tests (`go test ./...`), then the frontend Playwright e2e suite |
 | `make clean` | Remove `bin/` and `frontend/dist`, then restore the tracked `frontend/dist/.gitkeep` placeholder |
 
 ### Taskfile (Cross-platform builds)

@@ -315,7 +315,7 @@ ok      cmdex   0.234s
 
 Three tests pass across the root package. The `migrations/` package has no test files.
 
-There are no `task test` or `make test` targets in `Taskfile.yml` or `Makefile`.
+`make test` runs `go test ./...` followed by the frontend Playwright e2e suite (`cd frontend && pnpm test:e2e`); there is no `task test` target in `Taskfile.yml`.
 
 ### Frontend Tests
 

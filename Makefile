@@ -24,6 +24,8 @@ lint-fix:
 	golangci-lint run --fix || true
 
 test:
+	mkdir -p frontend/dist
+	go test ./...
 	cd frontend && pnpm test:e2e
 
 clean:

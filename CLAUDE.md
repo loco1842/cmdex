@@ -41,7 +41,7 @@ make clean                # removes bin/ and frontend/dist/, then restores the
 cd frontend && pnpm install
 ```
 
-**Tests exist:** Go tests (`db_test.go`, `terminal_service_test.go` + stress/max-sessions variants) run via `go test ./...`; frontend Playwright e2e tests run via `cd frontend && pnpm test:e2e` (or `make test`). `make check` and CI only run `go build ./...` + `pnpm tsc --noEmit` — tests are not part of that gate.
+**Tests exist:** Go tests (`db_test.go`, `terminal_service_test.go` + stress/max-sessions variants) run via `go test ./...`; frontend Playwright e2e tests run via `cd frontend && pnpm test:e2e`. `make test` runs both (Go tests, then the e2e suite), and CI's `test` job runs the same two steps directly and gates the run on failure. `make check` and CI's `typecheck` job run `go build ./...` + `pnpm tsc --noEmit` as a separate, faster gate.
 
 ## Architecture
 

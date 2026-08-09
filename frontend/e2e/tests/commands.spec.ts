@@ -34,10 +34,13 @@ test.describe('Commands', () => {
 
     await page.locator(SCRIPT_TEXTAREA).fill('echo "hello"');
 
-    // Reveal the title input by clicking the "Add title" pill
-    // (the pill is hover-revealed; force:true bypasses opacity/pointer-events)
-    await page.locator('.add-title-pill').click({ force: true });
-    await page.waitForTimeout(200);
+    // Reveal the title input by clicking the "Add title" pill. The pill has
+    // pointer-events: none until its .hover-actions-host ancestor is hovered
+    // (force:true skips Playwright's actionability checks but not the
+    // browser's native pointer-events hit-test), so hover the ancestor first.
+    await page.locator('.hover-actions-host.script-area-hover').hover();
+    await page.locator('.add-title-pill').click();
+    await expect(page.locator('[data-testid="command-title"]')).toBeVisible();
 
     // Enter an explicit title different from the script content
     await page.locator('[data-testid="command-title"]').fill('My Custom Title');

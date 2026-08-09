@@ -31,7 +31,10 @@ cd frontend && pnpm lint                # pnpm lint:fix for auto-fix
 go test ./...                           # go test -run TestFreshDBMigrations -v ./...
 
 # Frontend e2e tests (Playwright)
-cd frontend && pnpm test:e2e            # or: make test
+cd frontend && pnpm test:e2e
+
+# Go tests + frontend e2e tests together
+make test
 ```
 
 **Note:** The Makefile targets `make dev/build/generate/check/fmt/lint/test/clean` exist. `make clean` removes `bin/` (the real build output dir) and `frontend/dist/`, then restores the tracked `frontend/dist/.gitkeep` placeholder that `//go:embed all:frontend/dist` in `main.go` requires to exist. The Taskfile (`task dev`, `task build`) provides more options (Docker cross-compile, server mode). Both call `wails3` under the hood.
@@ -140,9 +143,9 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 - Go: `db_test.go` — three migration tests (`TestFreshDBMigrations`, `TestExistingDBIdempotent`, `TestRollbackTo`). Run with `go test ./...`.
 - Go: `terminal_service_test.go` + `terminal_service_stress_test.go` + `terminal_service_max_sessions_test.go` — multi-session CRUD, cwd inheritance, 100-cycle stress test, and MaxSessions limit test. Stress and max-sessions tests are `//go:build darwin` (use the mock backend from `pty_backend_mock_test.go`).
 - **Windows conpty verification gap:** The conpty backend in `pty_backend_windows.go` is a stub that returns "not implemented" errors. Runtime conpty testing is not done in this milestone — see `.planning/phases/25-polish-integration/CHECKPOINT.md` for the full gap documentation.
-- Frontend: Playwright e2e tests under `frontend/e2e/tests/*.spec.ts` (commands, categories, themes, smoke test). Run with `cd frontend && pnpm test:e2e` or `make test`. `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by hardcoding each generated binding's numeric `$Call.ByID` method hash — if you regenerate bindings and IDs shift, update this mock's handler table or tests fail silently with `[e2e mock] no handler for method ID …` console warnings.
+- Frontend: Playwright e2e tests under `frontend/e2e/tests/*.spec.ts` (commands, categories, themes, smoke test). Run with `cd frontend && pnpm test:e2e`, or `make test` which runs `go test ./...` first and then the e2e suite. `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by hardcoding each generated binding's numeric `$Call.ByID` method hash — if you regenerate bindings and IDs shift, update this mock's handler table or tests fail silently with `[e2e mock] no handler for method ID …` console warnings.
 - `.golangci.yml` (golangci-lint v2 config, `forbidigo` disabled — its default fmt.Println/Printf ban conflicts with this codebase's logging convention). Runs in CI's `typecheck` job via `golangci/golangci-lint-action`, advisory (`continue-on-error: true`, same as `pnpm lint`) — currently reports ~150 pre-existing findings (mostly `noctx`, `mnd`, `gosec`, `errcheck`) that don't block anything. `make lint` runs this exact config locally (`golangci-lint run || true` — the `|| true` keeps it advisory, since golangci-lint exits non-zero on findings). `make fmt` (`golangci-lint fmt`) is a separate formatting-only command that rewrites files in place using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`).
-- `make check` and CI run `go build ./...` + `pnpm tsc --noEmit` only — none of the above (Go tests, e2e, golangci-lint, fmt, lint) block a commit or a CI run today.
+- CI's `test` job runs `go test ./...` and the Playwright e2e suite on every push/PR and blocks the run on failure. `golangci-lint` and `pnpm lint` remain advisory (`continue-on-error: true`) in the `typecheck` job. `make check`/`make fmt`/`make lint` are local-only conveniences — CI does not invoke the Makefile directly.
 
 ## Local CI Verification (act)
 
@@ -157,6 +160,9 @@ Both workflows need `-s GITHUB_TOKEN=<token>` (any PAT — used by `arduino/setu
 ```bash
 # ci.yml — typecheck job (Linux-only, fully runnable)
 act push -W .github/workflows/ci.yml -j typecheck -s GITHUB_TOKEN=$GITHUB_TOKEN
+
+# ci.yml — test job (Go tests + Playwright e2e, Linux-only, fully runnable)
+act push -W .github/workflows/ci.yml -j test -s GITHUB_TOKEN=$GITHUB_TOKEN
 
 # ci.yml — build-check, per matrix os
 act push -W .github/workflows/ci.yml -j build-check --matrix os:ubuntu-24.04 -s GITHUB_TOKEN=$GITHUB_TOKEN

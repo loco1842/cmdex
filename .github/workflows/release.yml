@@ -92,7 +92,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/apt-cache
-          key: apt-release-${{ matrix.os }}-${{ hashFiles('.github/workflows/release.yml') }}
+          key: apt-release-${{ matrix.os }}-${{ hashFiles('.github/apt-packages.txt') }}
+          restore-keys: |
+            apt-release-${{ matrix.os }}-
 
       - name: Install Linux build deps
         if: runner.os == 'Linux'
@@ -101,7 +103,7 @@ jobs:
           mkdir -p /tmp/apt-cache
           sudo cp -r /tmp/apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev
+          sudo apt-get install -y --no-install-recommends $(cat .github/apt-packages.txt)
           sudo cp /var/cache/apt/archives/*.deb /tmp/apt-cache/ 2>/dev/null || true
           sudo chmod -R a+r /tmp/apt-cache
 
@@ -135,16 +137,16 @@ jobs:
           path: ~/go/bin
           key: gobin-${{ runner.os }}-${{ env.WAILS_VERSION }}
 
+      - name: Add Go bin to PATH
+        shell: bash
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
       - name: Install Wails CLI
         shell: bash
         run: |
           if ! command -v wails3 >/dev/null 2>&1; then
             go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
           fi
-
-      - name: Add Go bin to PATH
-        shell: bash
-        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Package release build
         if: startsWith(github.ref, 'refs/tags/')
