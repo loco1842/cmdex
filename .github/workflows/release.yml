@@ -132,6 +132,7 @@ jobs:
           }
 
       - name: Cache Go bin
+        id: cache-gobin
         uses: actions/cache@v4
         with:
           path: ~/go/bin
@@ -142,11 +143,9 @@ jobs:
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails CLI
+        if: steps.cache-gobin.outputs.cache-hit != 'true'
         shell: bash
-        run: |
-          if ! command -v wails3 >/dev/null 2>&1; then
-            go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
-          fi
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: Package release build
         if: startsWith(github.ref, 'refs/tags/')

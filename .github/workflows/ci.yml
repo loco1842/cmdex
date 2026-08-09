@@ -97,6 +97,7 @@ jobs:
           version: v2.12.2
 
       - name: Cache Go bin
+        id: cache-gobin
         uses: actions/cache@v4
         with:
           path: ~/go/bin
@@ -107,11 +108,9 @@ jobs:
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails CLI
+        if: steps.cache-gobin.outputs.cache-hit != 'true'
         shell: bash
-        run: |
-          if ! command -v wails3 >/dev/null 2>&1; then
-            go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
-          fi
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: Generate Wails bindings
         run: wails3 generate bindings -clean=true
@@ -188,6 +187,7 @@ jobs:
         run: go test ./...
 
       - name: Cache Go bin
+        id: cache-gobin
         uses: actions/cache@v4
         with:
           path: ~/go/bin
@@ -198,11 +198,9 @@ jobs:
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails CLI
+        if: steps.cache-gobin.outputs.cache-hit != 'true'
         shell: bash
-        run: |
-          if ! command -v wails3 >/dev/null 2>&1; then
-            go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
-          fi
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: Generate Wails bindings
         run: wails3 generate bindings -clean=true
@@ -322,6 +320,7 @@ jobs:
           }
 
       - name: Cache Go bin
+        id: cache-gobin
         uses: actions/cache@v4
         with:
           path: ~/go/bin
@@ -332,11 +331,9 @@ jobs:
         run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails CLI
+        if: steps.cache-gobin.outputs.cache-hit != 'true'
         shell: bash
-        run: |
-          if ! command -v wails3 >/dev/null 2>&1; then
-            go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
-          fi
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: Install frontend deps
         working-directory: frontend
