@@ -7,14 +7,16 @@
 # If your app needs CGO, override the build args, e.g.:
 #   docker build --build-arg CGO_ENABLED=1 \
 #                --build-arg GO_IMAGE=golang:bookworm \
-#                --build-arg RUNTIME_IMAGE=gcr.io/distroless/base-debian12 \
+#                --build-arg RUNTIME_IMAGE=gcr.io/distroless/base-debian12:nonroot \
 #                -f build/docker/Dockerfile.server .
 # CGO needs a C toolchain in the builder and a libc in the runtime image; keep
 # the builder and runtime libc compatible (a glibc builder -> a glibc runtime).
+# Keep the ":nonroot" tag on any RUNTIME_IMAGE override too — this app's whole
+# purpose is executing user-supplied bash, so it must not run as root.
 # The Taskfile passes these through: task build:docker CGO_ENABLED=1 GO_IMAGE=... RUNTIME_IMAGE=...
 
-ARG GO_IMAGE=golang:alpine
-ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12
+ARG GO_IMAGE=golang:1.26-alpine
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
 ARG CGO_ENABLED=0
 
 # Build stage
@@ -34,11 +36,21 @@ RUN if command -v apk >/dev/null 2>&1; then \
 # Copy source code
 COPY . .
 
-# Remove local replace directive if present (for production builds)
-RUN sed -i '/^replace/d' go.mod || true
+# Remove local replace directives if present (for production builds). Handles
+# both single-line (`replace foo => bar`) and block-form (`replace (\n...\n)`)
+# directives so a block doesn't leave an orphaned body + ")" behind.
+RUN awk '\
+        /^replace[[:space:]]*\(/ { skip=1; next } \
+        skip && /^\)/            { skip=0; next } \
+        skip                      { next } \
+        /^replace[[:space:]]/    { next } \
+        { print } \
+    ' go.mod > go.mod.tmp && mv go.mod.tmp go.mod
 
-# Download dependencies
-RUN go mod tidy
+# Download dependencies, verified against the committed go.sum (reproducible;
+# unlike `go mod tidy`, this does not resolve the module graph from the
+# network or rewrite go.mod/go.sum inside the build).
+RUN go mod download
 
 # Build the production server binary.
 # - server,production tags: HTTP server mode with production code paths (no dev
@@ -62,6 +74,11 @@ EXPOSE 8080
 # Bind to all interfaces (required for Docker)
 # Can be overridden at runtime with -e WAILS_SERVER_HOST=...
 ENV WAILS_SERVER_HOST=0.0.0.0
+
+# Run as non-root. Numeric UID:GID (not the "nonroot" name) so this still
+# resolves even if RUNTIME_IMAGE is overridden to an image without a
+# "nonroot" passwd entry — 65532 is the distroless "nonroot" convention.
+USER 65532:65532
 
 # Run the server
 ENTRYPOINT ["/server"]

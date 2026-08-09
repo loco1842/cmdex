@@ -30,7 +30,7 @@ Two workflows drive the build and release process:
 Triggers on every push or pull request to `main`.
 
 - **Type Check Job** (`ubuntu-latest`)
-  - Installs Go (version from `go.mod`), Node.js 25, pnpm, and Linux build dependencies (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`).
+  - Installs Go (version from `go.mod`), Node.js 24, pnpm, and Linux build dependencies (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`).
   - Installs Wails v3 CLI (`v3.0.0-beta.5`).
   - Generates Wails bindings and runs `pnpm tsc --noEmit`.
   - Runs `go build ./...` to verify compilation.
@@ -51,12 +51,12 @@ Build matrix:
 | OS Runner | Artifact Name | Package Task |
 |-----------|---------------|--------------|
 | `ubuntu-24.04` | `cmdex-linux-amd64` | `task package` |
-| `macos-latest` | `cmdex-darwin-universal` | `task package:universal` |
+| `macos-latest` | `cmdex-darwin-universal` | `task package:dmg:universal` |
 | `windows-latest` | `cmdex-windows-amd64` | `task package` |
 
 Steps:
 1. Check out source.
-2. Install Go, Node.js 25, pnpm, Task, Wails v3 CLI, and platform dependencies.
+2. Install Go, Node.js 24, pnpm, Task, Wails v3 CLI, and platform dependencies.
 3. Build and package the application.
 4. Upload artifacts (`bin/*.AppImage`, `*.deb`, `*.rpm`, `*.dmg`, `*-installer.exe`).
 5. If triggered by a tag, download all artifacts, flatten them, and create a **GitHub Release** using `softprops/action-gh-release` with auto-generated release notes.
@@ -70,7 +70,7 @@ Steps:
 ### Prerequisites
 
 - **Go** `>= 1.26.0`
-- **Node.js** `25`
+- **Node.js** `24`
 - **pnpm**
 - **Wails v3 CLI** `v3.0.0-beta.5`
 - **Task** (`taskfile.dev`) `3.x`

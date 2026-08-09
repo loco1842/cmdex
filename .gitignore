@@ -8,7 +8,7 @@ build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 frontend/node_modules
 frontend/dist/*
 !frontend/dist/.gitkeep
-cmdex
+/cmdex
 .worktrees/
 .superpowers/
 .cursor/hooks.json

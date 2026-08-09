@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -109,6 +110,55 @@ func TestRollbackTo(t *testing.T) {
 		if err != nil {
 			t.Errorf("expected table %q not found after rollback: %v", table, err)
 		}
+	}
+}
+
+func TestUpdateCommandCategoryChange(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	if err := db.runMigrations(); err != nil {
+		t.Fatalf("runMigrations failed: %v", err)
+	}
+
+	catA := Category{ID: "cat-a", Name: "A", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	catB := Category{ID: "cat-b", Name: "B", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := db.CreateCategory(catA); err != nil {
+		t.Fatalf("create category A: %v", err)
+	}
+	if err := db.CreateCategory(catB); err != nil {
+		t.Fatalf("create category B: %v", err)
+	}
+
+	cmd := Command{
+		ID:            "cmd-1",
+		Title:         sql.NullString{String: "original", Valid: true},
+		ScriptContent: "echo hi",
+		CategoryID:    catA.ID,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if err := db.CreateCommand(cmd); err != nil {
+		t.Fatalf("create command: %v", err)
+	}
+
+	// Category change must reindex via UpdateCommandPosition, then update fields.
+	cmd.Title = sql.NullString{String: "updated", Valid: true}
+	cmd.CategoryID = catB.ID
+	cmd.UpdatedAt = time.Now()
+	if err := db.UpdateCommand(cmd); err != nil {
+		t.Fatalf("UpdateCommand with category change failed: %v", err)
+	}
+
+	got, err := db.GetCommand(cmd.ID)
+	if err != nil {
+		t.Fatalf("GetCommand after update: %v", err)
+	}
+	if got.CategoryID != catB.ID {
+		t.Errorf("CategoryID = %q, want %q", got.CategoryID, catB.ID)
+	}
+	if got.Title.String != "updated" {
+		t.Errorf("Title = %q, want %q", got.Title.String, "updated")
 	}
 }
 

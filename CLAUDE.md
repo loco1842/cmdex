@@ -28,9 +28,9 @@ wails3 generate bindings  # or: make generate
 # Type-check Go and TypeScript
 make check                # runs: go build ./... && cd frontend && pnpm tsc --noEmit
 
-# Go formatting/lint (not wired into `make check`; lint runs advisory in CI)
+# Go formatting/lint (not wired into `make check`; lint is blocking in CI)
 make fmt                  # golangci-lint fmt (rewrites files: goimports + golines)
-make lint                 # golangci-lint run (same config as CI)
+make lint                 # golangci-lint run (same config as CI; fails on findings)
 
 # Clean build artifacts
 make clean                # removes bin/ and frontend/dist/, then restores the
@@ -134,8 +134,8 @@ The editor uses a tab-based interface (replaced modal `CommandEditor`):
 ## Gotchas
 
 - `category_id` in `commands` table is nullable (`NULL` = uncategorized). Use `nullableString()` helper when inserting/updating, and `sql.NullString` when scanning.
-- After changing Go structs or method signatures, delete `~/.cmdex/cmdex.db` if schema changed, or bump `schemaVersion` and add migration in `db.go`
-- Schema migrations must recreate tables (SQLite doesn't support `ALTER COLUMN`) — see v1->v2 migration pattern in `db.go`
+- After changing Go structs or method signatures, delete `~/.cmdex/cmdex.db` if schema changed, or add a new migration in the `migrations/` package (see Schema Migration Pattern below) — there is no `schemaVersion` constant in `db.go`; the applied version lives in the `schema_version` table and is driven by the ordered `Migrations` slice in `migrations/migration.go`
+- Schema migrations must recreate tables (SQLite doesn't support `ALTER COLUMN`) — see the migration pattern below
 - Schema migrations must be wrapped in transactions to prevent partial failures leaving DB inconsistent
 - `//go:embed all:frontend/dist` in `main.go` requires `frontend/dist` to exist and be non-empty, or `go build`/`go vet`/`go test`/`wails3 build` all fail with `pattern all:frontend/dist: no matching files found`. A tracked `frontend/dist/.gitkeep` placeholder keeps this working on a fresh checkout; `make clean` deletes and restores it. `wails3 build`/`wails3 dev` build the real frontend first so this only bites bare `go build`/`go test` invocations.
 - When changing script storage format, delete `~/.cmdex/cmdex.db` to reset
@@ -242,7 +242,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - **Vite:** `frontend/vite.config.ts` — React + Tailwind plugins, path alias `@` → `frontend/src`, Wails bindings plugin.
 - **TypeScript:** `frontend/tsconfig.json` — `strict: false`, `paths` `@/*` → `./src/*`; `frontend/tsconfig.node.json` for tooling.
 - **UI generator metadata:** `frontend/components.json` — shadcn schema, New York style, aliases for `@/components`, `@/lib`.
-- **Go lint:** `.golangci.yml` (golangci-lint v2 config, `forbidigo` disabled — conflicts with this codebase's `fmt.Println` logging convention). Runs advisory (`continue-on-error: true`) in CI's `typecheck` job via `golangci/golangci-lint-action`; not wired into `make check`. Run the same config locally with `make lint`.
+- **Go lint:** `.golangci.yml` (golangci-lint v2 config, `forbidigo` disabled — conflicts with this codebase's `fmt.Println` logging convention). Runs in CI's `typecheck` job via `golangci/golangci-lint-action` and blocks the run on any finding (same as `pnpm lint`); not wired into `make check`. Run the same config locally with `make lint`.
 ## Platform Requirements
 - Go matching `go.mod` (1.26.x).
 - Wails v3 CLI, pinned to `v3.0.0-beta.5` (see `docs/GETTING-STARTED.md`).
@@ -270,7 +270,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Functions and variables: **camelCase** (`getCommandDisplayTitle`, `emptyDraft`, `isNewCommandTabId`).
 - Constants: **SCREAMING_SNAKE_CASE** where used for shortcut registry keys in `frontend/src/lib/shortcuts.ts` (re-exported via `useKeyboardShortcuts`).
 ## Code Style
-- Standard **gofmt** layout (tabs for indentation). `.golangci.yml` (golangci-lint v2 config) runs advisory in CI (`continue-on-error: true`) and locally via `make lint` (`golangci-lint run || true` — the `|| true` keeps it advisory, since golangci-lint's own exit code is non-zero on findings). Not wired into `make check`. `make fmt` (`golangci-lint fmt`) is a separate formatting command that rewrites files using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`). No `.editorconfig` detected.
+- Standard **gofmt** layout (tabs for indentation). `.golangci.yml` (golangci-lint v2 config) blocks CI's `typecheck` job on findings and locally via `make lint` (`golangci-lint run`, no `|| true`). Not wired into `make check`. `make fmt` (`golangci-lint fmt`) is a separate formatting command that rewrites files using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`). No `.editorconfig` detected.
 - Module path: `cmdex` in `go.mod`; Go **1.26.0** as declared there.
 - **TypeScript** with `frontend/tsconfig.json`: `strict` is **false**; `forceConsistentCasingInFileNames` is true.
 - **Mixed punctuation style**: root `App.tsx` and many components use semicolons and often single quotes; `frontend/src/components/ui/button.tsx` and `frontend/src/lib/utils.ts` use double quotes and omit semicolons. New code should match the file you are editing.
@@ -326,7 +326,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Used by: React via generated bindings under `frontend/bindings/cmdex/<servicename>.js`
 - Purpose: SQLite access, schema, migrations, FTS5 search, CRUD for all entities.
 - Location: `db.go`
-- Contains: `DB` struct, `schemaVersion` / `migrate()`, queries, `SearchCommands` against `commands_fts`.
+- Contains: `DB` struct, `runMigrations()`/`RollbackTo()` (running the ordered `migrations.Migrations` slice), queries, `SearchCommands` against `commands_fts`.
 - Depends on: `database/sql`, `modernc.org/sqlite`, `models.go` types
 - Used by: `app.go` exclusively
 - Purpose: Shebang wrapping/stripping, `{{var}}` detection, merge with manual variable definitions.
@@ -363,7 +363,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Pattern: Facade over store + executor; no interface indirection in-repo.
 - Purpose: Encapsulates connection string (WAL, foreign keys), migrations, and all SQL.
 - Examples: `db.go`
-- Pattern: Struct + methods; `schemaVersion` constant drives incremental migrations.
+- Pattern: Struct + methods; the ordered `migrations.Migrations` slice drives incremental migrations against the `schema_version` table.
 - Purpose: Shell selection (Windows vs Unix), script file lifecycle, subprocess I/O, CEL evaluation for defaults, terminal detection.
 - Examples: `executor.go`
 - Pattern: Stateless executor type constructed once in `startup`.

@@ -19,8 +19,8 @@ wails3 build                            # or: make build  or: task build
 # Full checks (run before committing)
 make check                              # go build ./... && cd frontend && pnpm tsc --noEmit
 
-# Go formatting + lint (not wired into `make check`; lint is advisory,
-# matching pnpm lint's continue-on-error tolerance in CI)
+# Go formatting + lint (not wired into `make check`; lint is blocking in CI —
+# both this and `pnpm lint` fail the run on any finding)
 make fmt                                # golangci-lint fmt (rewrites files: goimports + golines)
 make lint                               # golangci-lint run (same config CI uses)
 
@@ -43,7 +43,7 @@ make test
 
 ### Service registration (not the old v2 single-App pattern)
 
-In `main.go`, six services are registered as `application.Service`:
+In `main.go`, seven services are registered as `application.Service`:
 
 | Service struct | File | Frontend binding import |
 |---|---|---|
@@ -55,7 +55,7 @@ In `main.go`, six services are registered as `application.Service`:
 | `EventService` | `event_service.go` | `../bindings/cmdex/eventservice` |
 | `TerminalService` | `terminal_service.go` (+ `pty_backend*.go`) | `../bindings/cmdex/terminalservice` |
 
-Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates TypeScript bindings from exported methods into `frontend/bindings/cmdex/<servicename>/`. **Never hand-edit `frontend/bindings/`** — it's generated output.
+Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates TypeScript bindings from exported methods into `frontend/bindings/cmdex/<servicename>/`. **Never hand-edit `frontend/bindings/`** — it's generated output, but it **is** committed (so a fresh clone type-checks without the Wails CLI installed); regenerate with `wails3 generate bindings` and commit the result alongside the Go change that caused it.
 
 ### Adding a new feature
 
@@ -144,8 +144,8 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 - Go: `terminal_service_test.go` + `terminal_service_stress_test.go` + `terminal_service_max_sessions_test.go` — multi-session CRUD, cwd inheritance, 100-cycle stress test, and MaxSessions limit test. Stress and max-sessions tests are `//go:build darwin` (use the mock backend from `pty_backend_mock_test.go`).
 - **Windows conpty verification gap:** The conpty backend in `pty_backend_windows.go` is a stub that returns "not implemented" errors. Runtime conpty testing is not done in this milestone — see `.planning/phases/25-polish-integration/CHECKPOINT.md` for the full gap documentation.
 - Frontend: Playwright e2e tests under `frontend/e2e/tests/*.spec.ts` (commands, categories, themes, smoke test). Run with `cd frontend && pnpm test:e2e`, or `make test` which runs `go test ./...` first and then the e2e suite. `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by hardcoding each generated binding's numeric `$Call.ByID` method hash — if you regenerate bindings and IDs shift, update this mock's handler table or tests fail silently with `[e2e mock] no handler for method ID …` console warnings.
-- `.golangci.yml` (golangci-lint v2 config, `forbidigo` disabled — its default fmt.Println/Printf ban conflicts with this codebase's logging convention). Runs in CI's `typecheck` job via `golangci/golangci-lint-action`, advisory (`continue-on-error: true`, same as `pnpm lint`) — currently reports ~150 pre-existing findings (mostly `noctx`, `mnd`, `gosec`, `errcheck`) that don't block anything. `make lint` runs this exact config locally (`golangci-lint run || true` — the `|| true` keeps it advisory, since golangci-lint exits non-zero on findings). `make fmt` (`golangci-lint fmt`) is a separate formatting-only command that rewrites files in place using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`).
-- CI's `test` job runs `go test ./...` and the Playwright e2e suite on every push/PR and blocks the run on failure. `golangci-lint` and `pnpm lint` remain advisory (`continue-on-error: true`) in the `typecheck` job. `make check`/`make fmt`/`make lint` are local-only conveniences — CI does not invoke the Makefile directly.
+- `.golangci.yml` (golangci-lint v2 config; disables `unused`, `forbidigo` — the latter's default fmt.Println/Printf ban conflicts with this codebase's logging convention — plus several complexity/style linters listed in the config's `disable:` block; `_test.go` files are excluded via `exclusions.paths`). Runs in CI's `typecheck` job via `golangci/golangci-lint-action` and **blocks the run on any finding** (same as `pnpm lint`) — currently 0 findings. `make lint` runs this exact config locally (`golangci-lint run`, no `|| true`, so it also fails on findings). `make fmt` (`golangci-lint fmt`) is a separate formatting-only command that rewrites files in place using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`).
+- CI's `test` job runs `go test ./...` and the Playwright e2e suite on every push/PR and blocks the run on failure. `golangci-lint` and `pnpm lint` also block the `typecheck` job on any finding. `make check`/`make fmt`/`make lint` are local-only conveniences — CI does not invoke the Makefile directly.
 
 ## Local CI Verification (act)
 

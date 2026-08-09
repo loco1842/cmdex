@@ -6,11 +6,16 @@ on:
     paths-ignore: ['**.md', 'docs/**', '.planning/**']
   pull_request:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', '.planning/**']
+    # No paths-ignore here: GitHub does not synthesize a status for a
+    # workflow that never triggers, so a doc-only PR would report no checks
+    # at all and could stall forever under required-check branch protection.
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   WAILS_VERSION: v3.0.0-beta.5
@@ -63,7 +68,6 @@ jobs:
       - name: Lint frontend
         working-directory: frontend
         run: pnpm lint
-        continue-on-error: true
 
       - name: Cache Linux apt deps
         uses: actions/cache@v4
@@ -92,7 +96,6 @@ jobs:
 
       - name: Go lint (golangci-lint)
         uses: golangci/golangci-lint-action@v9
-        continue-on-error: true
         with:
           version: v2.12.2
 
@@ -101,7 +104,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/bin
-          key: gobin-${{ runner.os }}-${{ env.WAILS_VERSION }}
+          key: gobin-typecheck-${{ runner.os }}-${{ env.WAILS_VERSION }}
 
       - name: Add Go bin to PATH
         shell: bash
@@ -191,7 +194,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/bin
-          key: gobin-${{ runner.os }}-${{ env.WAILS_VERSION }}
+          key: gobin-test-${{ runner.os }}-${{ env.WAILS_VERSION }}
 
       - name: Add Go bin to PATH
         shell: bash
@@ -228,7 +231,7 @@ jobs:
     needs: typecheck
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os:
           - ubuntu-24.04
@@ -324,7 +327,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/bin
-          key: gobin-${{ runner.os }}-${{ env.WAILS_VERSION }}
+          key: gobin-build-${{ runner.os }}-${{ env.WAILS_VERSION }}
 
       - name: Add Go bin to PATH
         shell: bash
