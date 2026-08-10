@@ -4,7 +4,7 @@
 
 ## Overview
 
-CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 18 + TypeScript** frontend. All data is stored locally in an **SQLite** database with no external services or cloud dependencies.
+CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 19.2.7 + TypeScript** frontend. All data is stored locally in an **SQLite** database with no external services or cloud dependencies.
 
 The app follows a service-oriented architecture on the backend, where discrete Wails v3 services expose domain-specific operations (commands, execution, settings, import/export) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with tab-based command editing, a searchable sidebar, streaming output panes, and a separate settings window.
 
@@ -16,7 +16,7 @@ The app follows a service-oriented architecture on the backend, where discrete W
 ┌─────────────────────────────────────────────────────────────┐
 │                      CmDex Desktop App                       │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              React 18 + Vite Frontend                  │  │
+│  │           React 19.2.7 + Vite Frontend                │  │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  │  │
 │  │  │   Sidebar   │  │ Command Tabs │  │ Output Panes │  │  │
 │  │  │  (Search)   │  │  (Editor)    │  │ (Streaming)  │  │  │
@@ -106,7 +106,7 @@ CmDex registers six Wails v3 services in `main.go`:
 
 ### Technology Stack
 
-- **Framework:** React 18 with TypeScript
+- **Framework:** React 19.2.7 with TypeScript
 - **Build Tool:** Vite
 - **UI Components:** shadcn/ui (built on Radix UI primitives + Tailwind CSS)
 - **State Management:** React `useState` and `useRef` (no external state library)
@@ -322,7 +322,7 @@ cmdex/
 │   ├── index.html
 │   ├── vite.config.ts
 │   ├── tsconfig.json
-│   └── package.json            # pnpm-based; React 18, Vite, Tailwind, shadcn/ui
+│   └── package.json            # pnpm-based; React 19.2.7, Vite, Tailwind, shadcn/ui
 │
 └── .planning/
     └── docs/
