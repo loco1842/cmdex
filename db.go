@@ -723,18 +723,18 @@ func (db *DB) CreateCommand(cmd Command) error {
 }
 
 func (db *DB) UpdateCommand(cmd Command) error {
-	var oldCategoryID sql.NullString
-	err := db.conn.QueryRowContext(context.Background(), "SELECT category_id FROM commands WHERE id = ?", cmd.ID).
-		Scan(&oldCategoryID)
-	if err != nil {
-		return fmt.Errorf("get existing command: %w", err)
-	}
-
 	tx, err := db.conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var oldCategoryID sql.NullString
+	err = tx.QueryRowContext(context.Background(), "SELECT category_id FROM commands WHERE id = ?", cmd.ID).
+		Scan(&oldCategoryID)
+	if err != nil {
+		return fmt.Errorf("get existing command: %w", err)
+	}
 
 	// Category moves need reindexing; share this tx with the field/tag/var writes below.
 	if oldCategoryID.String != cmd.CategoryID {
