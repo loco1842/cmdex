@@ -16,12 +16,15 @@ check:
 
 fmt:
 	golangci-lint fmt
+	cd frontend && pnpm lint:fix
 
 lint:
 	golangci-lint run
+	cd frontend && pnpm lint
 
 lint-fix:
 	golangci-lint run --fix
+	cd frontend && pnpm lint:fix
 
 test:
 	mkdir -p frontend/dist
