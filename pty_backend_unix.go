@@ -66,6 +66,10 @@ func (h osFileHandle) Close() error                { return h.f.Close() }
 // with cmd.Dir set is retried once with cmd.Dir cleared (inheriting the
 // app's own cwd) before giving up.
 func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
+	if rows < 1 || rows > 65535 || cols < 1 || cols > 65535 {
+		return nil, nil, fmt.Errorf("ptyStart: invalid dimensions rows=%d cols=%d (must be 1..65535)", rows, cols)
+	}
+
 	var args []string
 	if shellFlag != "" {
 		args = append(args, shellFlag)

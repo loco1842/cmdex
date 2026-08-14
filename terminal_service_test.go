@@ -162,10 +162,15 @@ func TestTerminalShutdown(t *testing.T) {
 	ss.shellFlag = shellFlag
 	ss.mu.Unlock()
 
+	wantDir := t.TempDir()
+
 	s.Stop(id)
-	ptmx, c, err := ptyStart(shellPath, shellFlag, "", 24, 80, "-c", "sleep 60")
+	ptmx, c, err := ptyStart(shellPath, shellFlag, wantDir, 24, 80, "-c", "sleep 60")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
+	}
+	if c.Dir != wantDir {
+		t.Errorf("cmd.Dir = %q, want %q", c.Dir, wantDir)
 	}
 
 	ss.mu.Lock()
@@ -198,6 +203,36 @@ func TestTerminalShutdown(t *testing.T) {
 	}
 }
 
+// TestPtyStart_RejectsInvalidDimensions verifies rows/cols outside 1..65535
+// are rejected before reaching the uint16 conversion passed to the PTY.
+func TestPtyStart_RejectsInvalidDimensions(t *testing.T) {
+	shellPath, shellFlag := detectShell()
+
+	cases := []struct {
+		name       string
+		rows, cols int
+	}{
+		{"zero rows", 0, 80},
+		{"zero cols", 24, 0},
+		{"negative rows", -1, 80},
+		{"negative cols", 24, -1},
+		{"rows too large", 65536, 80},
+		{"cols too large", 24, 65536},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ptmx, cmd, err := ptyStart(shellPath, shellFlag, "", tc.rows, tc.cols, "-c", "exit 0")
+			if err == nil {
+				t.Fatalf("ptyStart(rows=%d, cols=%d) succeeded, want error", tc.rows, tc.cols)
+			}
+			if ptmx != nil || cmd != nil {
+				t.Errorf("ptyStart returned non-nil ptmx/cmd alongside an error")
+			}
+		})
+	}
+}
+
 // TestTerminalExit verifies shell exit triggers monitorExit flow.
 func TestTerminalExit(t *testing.T) {
 	if testing.Short() {
@@ -210,10 +245,15 @@ func TestTerminalExit(t *testing.T) {
 	ss, _ := s.resolveSession(id)
 	shellPath, shellFlag := detectShell()
 
+	wantDir := t.TempDir()
+
 	s.Stop(id)
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, "", 24, 80, "-c", "exit 0")
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, wantDir, 24, 80, "-c", "exit 0")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
+	}
+	if cmd.Dir != wantDir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, wantDir)
 	}
 
 	ss.mu.Lock()
