@@ -9,6 +9,10 @@ on:
     # No paths-ignore here: GitHub does not synthesize a status for a
     # workflow that never triggers, so a doc-only PR would report no checks
     # at all and could stall forever under required-check branch protection.
+  workflow_dispatch:
+    # Manual trigger only — the `test` and `build-check` jobs are gated to
+    # this event so they don't run on every push/PR; `typecheck` still runs
+    # on push/PR as well as manual runs.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -124,6 +128,7 @@ jobs:
 
   test:
     name: Test
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
 
     steps:
@@ -228,6 +233,7 @@ jobs:
 
   build-check:
     name: Build check (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
     needs: typecheck
     runs-on: ${{ matrix.os }}
     strategy:
