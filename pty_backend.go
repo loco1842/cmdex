@@ -9,7 +9,7 @@ import (
 // It exists so the OS-specific implementation (creack/pty on darwin, conpty
 // stub on windows) can be swapped at test time via the darwin mock.
 type ptyBackend interface {
-	Start(shellPath, shellFlag string, rows, cols int) (ptyHandle, *exec.Cmd, error)
+	Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, *exec.Cmd, error)
 	Resize(handle ptyHandle, cols, rows int) error
 	Kill(cmd *exec.Cmd) error
 }

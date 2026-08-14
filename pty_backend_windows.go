@@ -24,7 +24,7 @@ func newPtyBackend() ptyBackend {
 type conptyBackend struct{}
 
 // Start returns an error — Windows conpty is not yet implemented.
-func (conptyBackend) Start(shellPath, shellFlag string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+func (conptyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
 	return nil, nil, fmt.Errorf("Windows PTY support not yet implemented — see Plan 16-03")
 }
 
@@ -40,7 +40,7 @@ func (conptyBackend) Kill(cmd *exec.Cmd) error {
 
 // ptyStart is the windows-side stub preserved as a package-level function so
 // test code referencing ptyStart continues to compile on windows.
-func ptyStart(shellPath, shellFlag string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
+func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
 	return nil, nil, fmt.Errorf("Windows PTY support not yet implemented — see Plan 16-03")
 }
 

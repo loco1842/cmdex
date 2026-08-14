@@ -163,7 +163,7 @@ func TestTerminalShutdown(t *testing.T) {
 	ss.mu.Unlock()
 
 	s.Stop(id)
-	ptmx, c, err := ptyStart(shellPath, shellFlag, 24, 80, "-c", "sleep 60")
+	ptmx, c, err := ptyStart(shellPath, shellFlag, "", 24, 80, "-c", "sleep 60")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestTerminalExit(t *testing.T) {
 	shellPath, shellFlag := detectShell()
 
 	s.Stop(id)
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, 24, 80, "-c", "exit 0")
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, "", 24, 80, "-c", "exit 0")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
 	}
