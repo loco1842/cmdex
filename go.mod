@@ -6,7 +6,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/cel-go v0.31.0
 	github.com/google/uuid v1.6.0
-	github.com/wailsapp/wails/v3 v3.0.0-beta.6
+	github.com/wailsapp/wails/v3 v3.0.0-beta.8
 	modernc.org/sqlite v1.56.0
 )
 

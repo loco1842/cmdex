@@ -11,7 +11,7 @@ Before you begin, make sure you have the following installed:
 - **Go** `>= 1.26.0`
 - **Node.js** `>= 20.19.0 || >=22.13.0 || >=24`
 - **pnpm** (required for frontend dependencies)
-- **Wails v3 CLI** (`v3.0.0-beta.5`)
+- **Wails v3 CLI** (`v3.0.0-beta.8`)
 - **Task** (optional, used by build scripts — install from [taskfile.dev](https://taskfile.dev))
 
 ### Platform-specific dependencies
@@ -39,7 +39,7 @@ Before you begin, make sure you have the following installed:
 
 2. **Install the Wails v3 CLI**
    ```bash
-   go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.5
+   go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
    ```
 
 3. **Install frontend dependencies**
@@ -108,16 +108,16 @@ The Vite dev server runs on port **9245** by default (baked into `Taskfile.yml`/
 
 ### Wails CLI version mismatch
 
-This project pins Wails to **`v3.0.0-beta.5`** (as specified in `go.mod`). Installing a different version of `wails3` can cause binding generation failures or unexpected behavior at runtime. Verify your installed version:
+This project pins Wails to **`v3.0.0-beta.8`** (as specified in `go.mod`). Installing a different version of `wails3` can cause binding generation failures or unexpected behavior at runtime. Verify your installed version:
 
 ```bash
 wails3 version
 ```
 
-If it does not match `v3.0.0-beta.5`, reinstall the exact version:
+If it does not match `v3.0.0-beta.8`, reinstall the exact version:
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.5
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
 ```
 
 ### Go toolchain version

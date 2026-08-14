@@ -9,7 +9,7 @@ Data is stored locally in a SQLite database at `~/.cmdex/cmdex.db` using `modern
 ## Prerequisites
 
 - Go 1.26+ (see `go.mod`)
-- Wails v3 CLI, pinned to `v3.0.0-beta.5` (see `.github/workflows/ci.yml`'s `WAILS_VERSION`): `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.5`
+- Wails v3 CLI, pinned to `v3.0.0-beta.8` (see `.github/workflows/ci.yml`'s `WAILS_VERSION`): `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8`
 - Node.js 24+ with pnpm (frontend package manager; see `frontend/package.json`, `build/config.yml`)
 - `wails.json` at the repo root is a leftover Wails v2 config file and is not read by the v3 toolchain — project config lives in `build/config.yml`
 
@@ -213,7 +213,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - **pnpm** — frontend installs (`frontend/package.json`, `frontend/pnpm-lock.yaml`); driven by `build/Taskfile.yml`'s `PACKAGE_MANAGER` var, not `wails.json` (a stale, unused Wails v2 config file).
 - Lockfile: `frontend/pnpm-lock.yaml` (present).
 ## Frameworks
-- **Wails v3** (`github.com/wailsapp/wails/v3` `v3.0.0-beta.5` in `go.mod`) — desktop shell via `application.New(...)`, asset server embedding `frontend/dist` (`//go:embed all:frontend/dist` in `main.go`), Go↔JS bindings (`wails3 generate bindings` → `frontend/bindings/cmdex/<servicename>.js`).
+- **Wails v3** (`github.com/wailsapp/wails/v3` `v3.0.0-beta.8` in `go.mod`) — desktop shell via `application.New(...)`, asset server embedding `frontend/dist` (`//go:embed all:frontend/dist` in `main.go`), Go↔JS bindings (`wails3 generate bindings` → `frontend/bindings/cmdex/<servicename>.js`).
 - **React** `^19.2.7` + **React DOM** `^19.2.7` — UI in `frontend/src/` (entry `frontend/src/main.tsx`, root `frontend/src/App.tsx`).
 - **Vite** `^8.0.16` with `@vitejs/plugin-react` `^5.2.0` — dev server and production bundle (`frontend/vite.config.ts`), plus the `@wailsio/runtime/plugins/vite` bindings plugin.
 - Go: `db_test.go`, `terminal_service_test.go` (+ stress/max-sessions variants, `//go:build darwin`) via `go test ./...`. Frontend: Playwright e2e under `frontend/e2e/` via `pnpm test:e2e`. `Makefile` `check` runs only `go build ./...` + `pnpm tsc --noEmit` — tests are a separate step.
@@ -221,7 +221,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - **TypeScript compiler** — `frontend` build script: `tsc && vite build` (`frontend/package.json`).
 - **GitHub Actions** — plain `actions/checkout`/`actions/setup-go`/`actions/setup-node`/`pnpm/action-setup` steps plus a manually `go install`ed `wails3` CLI and `arduino/setup-task` for Taskfile-driven builds; matrix over `ubuntu-24.04`/`macos-latest`/`windows-latest` (`.github/workflows/ci.yml`, `.github/workflows/release.yml`). No third-party "wails" GitHub Action is used.
 ## Key Dependencies
-- `github.com/wailsapp/wails/v3` `v3.0.0-beta.5` — application framework and desktop integration (webview2 is folded into this module as of beta.5, no longer a separate dependency).
+- `github.com/wailsapp/wails/v3` `v3.0.0-beta.8` — application framework and desktop integration (webview2 is folded into this module as of beta.5, no longer a separate dependency).
 - `modernc.org/sqlite` `v1.47.0` — pure-Go SQLite driver (imported in `db.go` as `_ "modernc.org/sqlite"`).
 - `github.com/google/cel-go` `v0.27.0` — CEL for variable default expressions in `executor.go`.
 - `github.com/google/uuid` `v1.6.0` — ID generation for domain entities.
@@ -245,7 +245,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - **Go lint:** `.golangci.yml` (golangci-lint v2 config, `forbidigo` disabled — conflicts with this codebase's `fmt.Println` logging convention). Runs in CI's `typecheck` job via `golangci/golangci-lint-action` and blocks the run on any finding (same as `pnpm lint`); not wired into `make check`. Run the same config locally with `make lint`.
 ## Platform Requirements
 - Go matching `go.mod` (1.26.x).
-- Wails v3 CLI, pinned to `v3.0.0-beta.5` (see `docs/GETTING-STARTED.md`).
+- Wails v3 CLI, pinned to `v3.0.0-beta.8` (see `docs/GETTING-STARTED.md`).
 - Node.js 24.x (matches CI) and pnpm.
 - macOS / Linux / Windows for full parity with terminal-launch paths in `executor.go` (Windows `conpty` backend is currently a stub — see `AGENTS.md` Tests section).
 - Desktop targets built via Wails; artifacts produced by local `wails3 build`/`task package` or the GitHub Actions release workflow (`.github/workflows/release.yml`).

@@ -400,7 +400,7 @@ Test execution **is part of the CI pipeline**, via a dedicated `test` job. The C
 | `build-check` | push/PR to `main` | Cross-platform build via `task build` on ubuntu-24.04, macos-latest, windows-latest |
 
 **Key CI details:**
-- Wails CLI version: `v3.0.0-beta.5` (pinned via `WAILS_VERSION` env var in CI)
+- Wails CLI version: `v3.0.0-beta.8` (pinned via `WAILS_VERSION` env var in CI)
 - Go version: read from `go.mod` (currently `1.26.0`)
 - Node version: `24` (pinned via `NODE_VERSION` env var in CI)
 - Package manager: `pnpm` 11 (pinned via `PNPM_VERSION`; installed with `pnpm/action-setup@v6`)
