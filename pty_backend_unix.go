@@ -102,29 +102,6 @@ func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...str
 	return ptmx, cmd, nil
 }
 
-// resolvePtyWorkingDir returns dir if it exists and is a directory, falling
-// back to the OS user home directory, then to "" (inherit the app's cwd) if
-// neither is usable. This is a best-effort pre-check only — ptyStart still
-// retries without a working directory if the chosen one fails at exec time
-// (deleted between check and use, or missing execute permission) — but it
-// keeps the common case (a stale/deleted configured working directory) from
-// needing that fallback path. e.g. getWorkingDir() can return a
-// saved-but-now-missing custom path, or "" if os.UserHomeDir() itself
-// failed.
-func resolvePtyWorkingDir(dir string) string {
-	if dir != "" {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if info, err := os.Stat(home); err == nil && info.IsDir() {
-			return home
-		}
-	}
-	return ""
-}
-
 func ptyResize(ptmx *os.File, cols, rows int) error {
 	return pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 }

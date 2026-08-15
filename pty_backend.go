@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 )
@@ -106,4 +107,28 @@ func (p *execProcess) Exited() bool {
 	default:
 		return false
 	}
+}
+
+// resolvePtyWorkingDir returns dir if it exists and is a directory, falling
+// back to the OS user home directory, then to "" (inherit the app's cwd) if
+// neither is usable. This is a best-effort pre-check only — Start still
+// retries without a working directory if the chosen one fails at spawn time
+// (deleted between check and use, or missing execute permission) — but it
+// keeps the common case (a stale/deleted configured working directory) from
+// needing that fallback path. e.g. getWorkingDir() can return a
+// saved-but-now-missing custom path, or "" if os.UserHomeDir() itself
+// failed. Platform-neutral (os.Stat/os.UserHomeDir behave the same on every
+// GOOS), so both the unix and windows backends share this.
+func resolvePtyWorkingDir(dir string) string {
+	if dir != "" {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if info, err := os.Stat(home); err == nil && info.IsDir() {
+			return home
+		}
+	}
+	return ""
 }

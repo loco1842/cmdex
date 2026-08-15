@@ -2,58 +2,460 @@
 
 package main
 
-// Windows PTY (conpty) is not yet implemented. The ptyBackend seam exists so
-// TerminalService never has to know which OS it's running on; on windows it
-// receives a conptyBackend stub that returns "not yet implemented" for Start
-// and Resize, and a working killProcessGroup for Kill (the taskkill helper
-// is platform-portable).
+// Windows PTY backend, backed by github.com/charmbracelet/x/conpty (see
+// "Library choice" in tasks/plan.md for why this library was picked over
+// github.com/UserExistsError/conpty, and the Phase 2 spike in
+// pty_backend_windows_conpty_spike_test.go for the real-hardware validation
+// that preceded this implementation).
+//
+// ConPTY cannot be driven through os/exec — there is no way to pass the
+// PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE attribute to syscall.StartProcess (see
+// golang/go#62708) — so conptyProcess wraps the raw process handle conpty's
+// Spawn returns instead of an *exec.Cmd, same as execProcess wraps *exec.Cmd
+// on unix.
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"github.com/charmbracelet/x/conpty"
+	"golang.org/x/sys/windows"
 )
 
-// newPtyBackend returns the conpty stub ptyBackend for windows.
+// conptyCloseTimeout bounds how long conptyHandle.Close waits for
+// ClosePseudoConsole, which is known to be able to block until the attached
+// client detaches. Close is on the critical path of Stop/CloseSession/
+// ServiceShutdown, so a bounded wait (log-and-leak) beats hanging the caller.
+const conptyCloseTimeout = 2 * time.Second
+
+// newPtyBackend returns the conpty-backed ptyBackend for windows.
 func newPtyBackend() ptyBackend {
 	return conptyBackend{}
 }
 
-// conptyBackend is the windows conpty-stub ptyBackend implementation.
+// conptyBackend is the real, conpty-backed ptyBackend implementation.
 type conptyBackend struct{}
 
-// Start returns an error — Windows conpty is not yet implemented.
+// Start spawns a shell attached to a new ConPTY.
 func (conptyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
-	return nil, nil, fmt.Errorf("Windows PTY support not yet implemented — see Plan 16-03")
+	return conptyStart(shellPath, shellFlag, dir, rows, cols)
 }
 
-// Resize returns an error — Windows conpty is not yet implemented.
+// conptyStart is the real implementation behind conptyBackend.Start,
+// separated out (mirroring pty_backend_unix.go's ptyStart) so it can take
+// extraArgs for tests.
+func conptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (ptyHandle, ptyProcess, error) {
+	if rows < 1 || rows > 65535 || cols < 1 || cols > 65535 {
+		return nil, nil, fmt.Errorf("conptyStart: invalid dimensions rows=%d cols=%d (must be 1..65535)", rows, cols)
+	}
+
+	// Resolve to an absolute path before Spawn. charmbracelet/x/conpty's
+	// internal lookExtensions resolves a BARE program name relative to the
+	// working directory whenever dir != "" — detectShell()'s "cmd" fallback
+	// (returned when neither pwsh nor powershell is found) is exactly such a
+	// bare name, so with any configured working directory, resolution would
+	// fail, silently trigger the dir-fallback retry below, and every cmd.exe
+	// session would lose its configured cwd. An absolute/volume-qualified
+	// path skips that code path entirely.
+	resolvedShellPath := shellPath
+	if resolved, err := exec.LookPath(shellPath); err == nil {
+		resolvedShellPath = resolved
+	}
+
+	argv := []string{resolvedShellPath}
+	if shellFlag != "" {
+		argv = append(argv, shellFlag)
+	}
+	argv = append(argv, extraArgs...)
+
+	// conpty.New/Resize take (width, height) == (cols, rows) — the reverse
+	// of this function's (rows, cols) parameter order.
+	cp, err := conpty.New(cols, rows, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("conpty.New: %w", err)
+	}
+
+	env := buildPtyEnv(os.Environ())
+	spawn := func(wd string) (int, uintptr, error) {
+		return cp.Spawn(resolvedShellPath, argv, &syscall.ProcAttr{Dir: wd, Env: env})
+	}
+
+	// Starting a session must not fail just because its configured working
+	// directory turned out to be unusable — mirrors ptyStart's retry on
+	// unix (pty_backend_unix.go), sharing resolvePtyWorkingDir's pre-check.
+	wd := resolvePtyWorkingDir(dir)
+	pid, rawHandle, err := spawn(wd)
+	if err != nil && wd != "" {
+		pid, rawHandle, err = spawn("")
+	}
+	if err != nil {
+		_ = cp.Close()
+		return nil, nil, fmt.Errorf("conpty.Spawn: %w", err)
+	}
+
+	proc := newConptyProcess(pid, windows.Handle(rawHandle))
+	handle := newConptyHandle(cp, proc)
+	return handle, proc, nil
+}
+
+// Resize updates the pseudo-console size.
 func (conptyBackend) Resize(handle ptyHandle, cols, rows int) error {
-	return fmt.Errorf("Windows PTY support not yet implemented")
+	h, ok := handle.(*conptyHandle)
+	if !ok {
+		return fmt.Errorf("conptyBackend.Resize: unexpected handle type %T", handle)
+	}
+	if h.closed.Load() {
+		return os.ErrClosed
+	}
+	h.rsz.Lock()
+	defer h.rsz.Unlock()
+	if h.closed.Load() {
+		return os.ErrClosed
+	}
+	return h.cp.Resize(cols, rows)
 }
 
-// Kill terminates the process group using taskkill.
+// Kill terminates proc's process tree via taskkill. Does not reap —
+// monitorExit's Wait() alone owns reaping (contract 7/8).
 func (conptyBackend) Kill(proc ptyProcess) error {
-	if proc == nil {
+	cp, ok := proc.(*conptyProcess)
+	if !ok || cp == nil {
 		return nil
 	}
-	return killProcessGroup(proc.Pid())
+	return cp.kill()
 }
 
-// ptyStart is the windows-side stub preserved as a package-level function so
-// test code referencing ptyStart continues to compile on windows.
+// conptyProcess adapts conpty.Spawn's returned (pid, handle) to ptyProcess.
+//
+// Wait is sync.Once-guarded: WaitForSingleObject blocks WITHOUT holding mu,
+// so a concurrent kill() (which does hold mu across its taskkill call, see
+// below) can never deadlock against it. The process handle is closed only
+// inside finish(), which runs strictly after the wait completes, so no
+// caller can ever be blocked on a handle another goroutine is closing —
+// this is the exact defect that ruled out github.com/UserExistsError/conpty
+// (see tasks/plan.md "Library choice"): its Close() closes the same handle
+// its own Wait() waits on.
+type conptyProcess struct {
+	pid int
+
+	mu sync.Mutex
+	h  windows.Handle // zeroed by finish() once Wait completes
+
+	waitOnce sync.Once
+	waitDone chan struct{}
+	code     int
+}
+
+func newConptyProcess(pid int, handle windows.Handle) *conptyProcess {
+	return &conptyProcess{pid: pid, h: handle, waitDone: make(chan struct{})}
+}
+
+func (p *conptyProcess) Pid() int { return p.pid }
+
+// Wait blocks until the process exits and reports its exit code. Safe to
+// call concurrently or repeatedly — only the first call actually waits.
+//
+// On any syscall error, this reports (0, nil) rather than a non-zero code or
+// an error: contract 9 (see tasks/plan.md) requires a trustworthy signal
+// here because monitorExit treats a non-zero/errored result as a crash and
+// auto-restarts after 100ms — a wrong signal on every future call would be
+// an infinite restart loop, whereas reporting a false "clean exit" costs at
+// most one missed auto-restart.
+func (p *conptyProcess) Wait() (int, error) {
+	p.waitOnce.Do(func() {
+		defer close(p.waitDone)
+
+		p.mu.Lock()
+		h := p.h
+		p.mu.Unlock()
+		if h == 0 {
+			p.finish(0)
+			return
+		}
+
+		if _, err := windows.WaitForSingleObject(h, windows.INFINITE); err != nil {
+			fmt.Printf("conptyProcess.Wait: WaitForSingleObject(pid=%d): %v\n", p.pid, err)
+			p.finish(0)
+			return
+		}
+
+		var code uint32
+		if err := windows.GetExitCodeProcess(h, &code); err != nil {
+			fmt.Printf("conptyProcess.Wait: GetExitCodeProcess(pid=%d): %v\n", p.pid, err)
+			p.finish(0)
+			return
+		}
+		p.finish(int(code))
+	})
+	<-p.waitDone
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.code, nil
+}
+
+// finish records the exit code and closes the process handle. This is the
+// only place the handle is closed, and it only ever runs after
+// WaitForSingleObject has returned, so no other goroutine can be blocked on
+// a handle this closes out from under it.
+func (p *conptyProcess) finish(code int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.code = code
+	if p.h != 0 {
+		_ = windows.CloseHandle(p.h)
+		p.h = 0
+	}
+}
+
+// Exited reports whether Wait has completed — see execProcess.Exited in
+// pty_backend.go for why this is backed by waitDone alone rather than any
+// direct field read.
+func (p *conptyProcess) Exited() bool {
+	select {
+	case <-p.waitDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// terminate is a fast, tree-less TerminateProcess used only by
+// conptyHandle.Close, so ClosePseudoConsole's teardown has nothing left to
+// wait on. Distinct from kill() (used by ptyBackend.Kill), which kills the
+// whole process tree via taskkill — Close only needs the immediate child
+// gone quickly, and every caller of Close() already calls Kill() right
+// after anyway (see terminal_service.go's CloseSession/Stop/
+// startSessionLocked), so a broader tree-kill here would be redundant.
+func (p *conptyProcess) terminate() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.h != 0 {
+		_ = windows.TerminateProcess(p.h, 1)
+	}
+}
+
+// kill terminates the process tree via taskkill. Idempotent and safe on an
+// already-exited process. Holding p.mu across the taskkill call is
+// deliberate: once p.h is closed (by finish(), after Wait completes),
+// Windows can recycle the PID, and an in-flight taskkill /PID lookup could
+// then hit an unrelated process that happened to reuse it. Holding the
+// mutex — and therefore keeping p.h open — for the duration of the
+// subprocess call prevents that race. This cannot deadlock Wait(): Wait's
+// blocking WaitForSingleObject call runs without holding p.mu (see above).
+func (p *conptyProcess) kill() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.h == 0 {
+		return nil
+	}
+	return killProcessGroup(p.pid)
+}
+
+// conptyHandle adapts a *conpty.ConPty to ptyHandle.
+//
+// Read does not trust the underlying ReadFile to unblock on Close(): ConPTY
+// keeps its own copy of the output pipe's write end open for its lifetime,
+// so the pipe does not break when the child exits, and closing a handle
+// with a pending synchronous ReadFile is undefined behavior on Win32 in
+// general. Instead, a dedicated pump goroutine owns the blocking Read call,
+// and the public Read method selects on a channel fed by the pump or a
+// done channel closed by Close — this makes Close() unblock Read in native
+// Go time regardless of what the underlying syscall does.
+type conptyHandle struct {
+	cp   *conpty.ConPty
+	proc *conptyProcess
+
+	out  chan []byte
+	done chan struct{}
+
+	rmu     sync.Mutex
+	rem     []byte
+	readErr error
+
+	wmu sync.Mutex
+	rsz sync.Mutex
+
+	closeOnce sync.Once
+	closed    atomic.Bool
+}
+
+func newConptyHandle(cp *conpty.ConPty, proc *conptyProcess) *conptyHandle {
+	h := &conptyHandle{
+		cp:   cp,
+		proc: proc,
+		out:  make(chan []byte, 1),
+		done: make(chan struct{}),
+	}
+	go h.pump()
+	return h
+}
+
+// pump runs the blocking conpty Read in its own goroutine so Close() can
+// unblock callers of Read via the done channel without waiting on the
+// syscall itself. Never forwards a (0, nil) read (contract 4: readLoop
+// would busy-spin on it) — a zero-byte, no-error read is treated as EOF,
+// which cannot happen for a byte-mode pipe but is handled defensively.
+func (h *conptyHandle) pump() {
+	defer close(h.out)
+	buf := make([]byte, readBufferSize)
+	for {
+		n, err := h.cp.Read(buf)
+		if n > 0 {
+			b := make([]byte, n)
+			copy(b, buf[:n])
+			select {
+			case h.out <- b:
+			case <-h.done:
+				return
+			}
+		}
+		if err != nil {
+			h.rmu.Lock()
+			switch {
+			case errors.Is(err, windows.ERROR_BROKEN_PIPE),
+				errors.Is(err, windows.ERROR_OPERATION_ABORTED),
+				errors.Is(err, windows.ERROR_INVALID_HANDLE):
+				h.readErr = io.EOF
+			default:
+				h.readErr = err
+			}
+			h.rmu.Unlock()
+			return
+		}
+		if n == 0 {
+			h.rmu.Lock()
+			h.readErr = io.EOF
+			h.rmu.Unlock()
+			return
+		}
+	}
+}
+
+func (h *conptyHandle) Read(p []byte) (int, error) {
+	h.rmu.Lock()
+	if len(h.rem) > 0 {
+		n := copy(p, h.rem)
+		h.rem = h.rem[n:]
+		h.rmu.Unlock()
+		return n, nil
+	}
+	h.rmu.Unlock()
+
+	select {
+	case b, ok := <-h.out:
+		if !ok {
+			h.rmu.Lock()
+			err := h.readErr
+			h.rmu.Unlock()
+			if err == nil {
+				err = io.EOF
+			}
+			return 0, err
+		}
+		n := copy(p, b)
+		h.rmu.Lock()
+		h.rem = b[n:]
+		h.rmu.Unlock()
+		return n, nil
+	case <-h.done:
+		return 0, os.ErrClosed
+	}
+}
+
+func (h *conptyHandle) Write(p []byte) (int, error) {
+	if h.closed.Load() {
+		return 0, os.ErrClosed
+	}
+	h.wmu.Lock()
+	defer h.wmu.Unlock()
+	if h.closed.Load() {
+		return 0, os.ErrClosed
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	n, err := h.cp.Write(p)
+	if err != nil {
+		return n, err
+	}
+	if n == 0 {
+		// Contract 5/6: Write is called under ss.mu in a loop that retries
+		// on partial writes; a (0, nil) return there is an infinite loop
+		// holding the session mutex.
+		return 0, fmt.Errorf("conptyHandle.Write: wrote 0 bytes with no error")
+	}
+	return n, nil
+}
+
+// Close is idempotent and safe to call while the child is alive. It closes
+// done first (unblocking any pending Read immediately, satisfying contract
+// 5 regardless of ClosePseudoConsole's own behavior), pre-terminates the
+// child so ClosePseudoConsole has nothing left to wait for, then bounds the
+// wait on ClosePseudoConsole itself — logging and leaking rather than
+// hanging the caller, since Close sits on the critical path of
+// Stop/CloseSession/ServiceShutdown.
+func (h *conptyHandle) Close() error {
+	var err error
+	h.closeOnce.Do(func() {
+		h.closed.Store(true)
+		close(h.done)
+
+		if h.proc != nil {
+			h.proc.terminate()
+		}
+
+		errCh := make(chan error, 1)
+		go func() { errCh <- h.cp.Close() }()
+		select {
+		case err = <-errCh:
+		case <-time.After(conptyCloseTimeout):
+			err = fmt.Errorf("conptyHandle.Close: ClosePseudoConsole did not return within %s (leaked)", conptyCloseTimeout)
+			fmt.Println(err.Error())
+		}
+	})
+	return err
+}
+
+// ptyStart is preserved as a package-level function with its legacy
+// *os.File/*exec.Cmd signature purely so TestPtyStart_RejectsInvalidDimensions
+// (terminal_service_test.go, untagged — runs on every platform) keeps
+// compiling and keeps testing real dimension validation on Windows. It
+// cannot return real conpty objects through this legacy signature (conpty's
+// handle/process types don't fit *os.File/*exec.Cmd) — the real
+// implementation is conptyStart above, reached via conptyBackend.Start
+// through the ptyBackend interface.
 func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
-	return nil, nil, fmt.Errorf("Windows PTY support not yet implemented — see Plan 16-03")
+	if rows < 1 || rows > 65535 || cols < 1 || cols > 65535 {
+		return nil, nil, fmt.Errorf("ptyStart: invalid dimensions rows=%d cols=%d (must be 1..65535)", rows, cols)
+	}
+	return nil, nil, fmt.Errorf("ptyStart: use conptyBackend.Start via the ptyBackend interface instead")
 }
 
-func ptyResize(ptmx *os.File, cols, rows int) error {
-	return fmt.Errorf("Windows PTY support not yet implemented")
-}
-
+// killProcessGroup terminates pid's process tree via taskkill, resolved
+// explicitly from %SystemRoot%\System32 rather than via PATH (exec.Command
+// with a bare name is PATH-hijackable), with CREATE_NO_WINDOW so no console
+// window flashes on every session close.
 func killProcessGroup(pid int) error {
 	if pid == 0 {
 		return nil
 	}
-	return exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+	cmd := exec.Command(taskkillPath(), "/F", "/T", "/PID", strconv.Itoa(pid))
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	return cmd.Run()
+}
+
+func taskkillPath() string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return root + `\System32\taskkill.exe`
 }
