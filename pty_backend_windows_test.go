@@ -37,36 +37,66 @@ import (
 )
 
 // TestConptyBackend_WriteReadRoundTrip verifies that real shell output
-// actually round-trips through TerminalService's outputCh on Windows.
+// actually round-trips through the production conptyHandle on Windows.
+//
+// Spawns via conptyStart directly rather than through
+// TerminalService.CreateSession: CreateSession's startEmitter starts a
+// goroutine that is the session's sole intended consumer of ss.outputCh.
+// A test reading directly from that same channel would be a second,
+// competing consumer — and since the emitter goroutine registers as a
+// waiting receiver well before the test's own select can, it would almost
+// always win each send, silently discarding the marker (wailsApp is nil in
+// tests, so the emitter's periodic flush has nowhere to send it) and
+// leaving the test to spin until its deadline every time. TestTerminalWrite
+// (terminal_service_test.go) already covers TerminalService.Write returning
+// no error; this test's job is only to prove real byte content round-trips
+// through the actual conptyHandle, which doesn't need the emitter at all.
 func TestConptyBackend_WriteReadRoundTrip(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	s := newTestTerminalService(t)
-	defer s.ServiceShutdown()
-
-	info, err := s.CreateSession()
+	shellPath, shellFlag := detectShell()
+	handle, proc, err := conptyStart(shellPath, shellFlag, "", 24, 80)
 	if err != nil {
-		t.Fatalf("CreateSession failed: %v", err)
+		t.Fatalf("conptyStart failed: %v", err)
 	}
+	defer func() {
+		_ = handle.Close()
+		_, _ = proc.Wait()
+	}()
 
 	const marker = "cmdex-windows-roundtrip-marker"
-	if err := s.Write(info.ID, "echo "+marker+"\r\n"); err != nil {
+	if _, err := handle.Write([]byte("echo " + marker + "\r\n")); err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	ss, err := s.resolveSession(info.ID)
-	if err != nil {
-		t.Fatalf("resolveSession failed: %v", err)
-	}
+	chunks := make(chan []byte, 16)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := handle.Read(buf)
+			if n > 0 {
+				b := make([]byte, n)
+				copy(b, buf[:n])
+				chunks <- b
+			}
+			if err != nil {
+				close(chunks)
+				return
+			}
+		}
+	}()
 
 	var accumulated strings.Builder
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
-		case data := <-ss.outputCh:
-			accumulated.WriteString(data)
+		case b, ok := <-chunks:
+			if !ok {
+				t.Fatalf("handle closed before marker observed; got: %q", accumulated.String())
+			}
+			accumulated.Write(b)
 			if strings.Contains(accumulated.String(), marker) {
 				return
 			}

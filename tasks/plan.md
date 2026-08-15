@@ -24,7 +24,11 @@ Cmdex's terminal sessions work on macOS/Linux but are dead on Windows: the termi
 // pty_backend.go
 type ptyProcess interface {
     Pid() int
-    Wait() (exitCode int, err error)   // returns the REAL exit status; callable once
+    // Wait returns the REAL exit status. Safe to call repeatedly and
+    // concurrently from multiple goroutines — the underlying process wait
+    // runs only once (sync.Once-guarded in both execProcess and
+    // conptyProcess), and every caller observes the same exit code/error.
+    Wait() (exitCode int, err error)
     Exited() bool                      // replaces `cmd.ProcessState == nil` checks
 }
 
@@ -233,13 +237,13 @@ The design review (read both libraries' full source, not just docs) found this i
 
 ## Task list
 
-To be written to `tasks/plan.md` and `tasks/todo.md` at implementation time (plan mode permits editing only this plan file).
+All tasks below are complete; see `tasks/todo.md` for the full record including Phase 5 (`/ship`-review follow-up fixes) and the commits/CI runs that verified each one.
 
-- [ ] 0.1 Add `test-windows` CI job running `go test ./...`
-- [ ] 0.2 Guard Unix-only assumptions in untagged tests → **Checkpoint 0**
-- [ ] 1.1 Introduce `ptyProcess`; rewire backends, mock, and `terminal_service.go`
-- [ ] 1.2 Fix the double-`Wait()` race in `execProcess` → **Checkpoint 1**
-- [ ] 2.1 ConPTY spike answering the three runtime risks → **Checkpoint 2**
-- [ ] 3.1 Implement `conptyBackend` + `conptyProcess`
-- [ ] 3.2 Windows-tagged test suite; un-skip stub-blocked tests → **Checkpoint 3**
-- [ ] 4.1 Update `AGENTS.md` / `CLAUDE.md`; record deferred items
+- [x] 0.1 Add `test-windows` CI job running `go test ./...`
+- [x] 0.2 Guard Unix-only assumptions in untagged tests → **Checkpoint 0**
+- [x] 1.1 Introduce `ptyProcess`; rewire backends, mock, and `terminal_service.go`
+- [x] 1.2 Fix the double-`Wait()` race in `execProcess` → **Checkpoint 1**
+- [x] 2.1 ConPTY spike answering the three runtime risks → **Checkpoint 2**
+- [x] 3.1 Implement `conptyBackend` + `conptyProcess`
+- [x] 3.2 Windows-tagged test suite; un-skip stub-blocked tests → **Checkpoint 3**
+- [x] 4.1 Update `AGENTS.md` / `CLAUDE.md`; record deferred items

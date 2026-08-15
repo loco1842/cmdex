@@ -150,9 +150,10 @@ func (conptyBackend) Kill(proc ptyProcess) error {
 // conptyProcess adapts conpty.Spawn's returned (pid, handle) to ptyProcess.
 //
 // Wait is sync.Once-guarded: WaitForSingleObject blocks WITHOUT holding mu,
-// so a concurrent kill() (which does hold mu across its taskkill call, see
-// below) can never deadlock against it. The process handle is closed only
-// inside finish(), which runs strictly after the wait completes, so no
+// so it can never deadlock against kill() or terminate(). The process
+// handle is only ever closed by closeHandleLocked, called from finish() and
+// from kill()'s background goroutine — whichever of the two runs last is
+// the one that actually closes it (see killing/exited below) — so no
 // caller can ever be blocked on a handle another goroutine is closing —
 // this is the exact defect that ruled out github.com/UserExistsError/conpty
 // (see tasks/plan.md "Library choice"): its Close() closes the same handle
@@ -160,8 +161,10 @@ func (conptyBackend) Kill(proc ptyProcess) error {
 type conptyProcess struct {
 	pid int
 
-	mu sync.Mutex
-	h  windows.Handle // zeroed by finish() once Wait completes
+	mu      sync.Mutex
+	h       windows.Handle // valid until closeHandleLocked actually closes it
+	killing int            // count of in-flight kill() calls still referencing h
+	exited  bool           // true once finish() has recorded the exit code
 
 	waitOnce sync.Once
 	waitDone chan struct{}
@@ -215,15 +218,27 @@ func (p *conptyProcess) Wait() (int, error) {
 	return p.code, nil
 }
 
-// finish records the exit code and closes the process handle. This is the
-// only place the handle is closed, and it only ever runs after
-// WaitForSingleObject has returned, so no other goroutine can be blocked on
-// a handle this closes out from under it.
+// finish records the exit code and, unless a kill() call is still in
+// flight, closes the process handle. It only ever runs after
+// WaitForSingleObject has returned. Never blocks — see closeHandleLocked.
 func (p *conptyProcess) finish(code int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.code = code
-	if p.h != 0 {
+	p.exited = true
+	p.closeHandleLocked()
+}
+
+// closeHandleLocked closes p.h once both finish() has recorded the exit
+// code and no kill() call is still referencing the pid/handle. Call with
+// p.mu held. This is the only place the handle is ever closed, and it's
+// called from both finish() and kill()'s background goroutine — whichever
+// runs last performs the actual close — so a handle is never closed while
+// an in-flight taskkill /PID lookup could still resolve it to a (possibly
+// since-recycled) PID, without either side needing to block waiting for
+// the other.
+func (p *conptyProcess) closeHandleLocked() {
+	if p.exited && p.killing == 0 && p.h != 0 {
 		_ = windows.CloseHandle(p.h)
 		p.h = 0
 	}
@@ -257,37 +272,42 @@ func (p *conptyProcess) terminate() {
 }
 
 // kill terminates the process tree via taskkill. Idempotent and safe on an
-// already-exited process. Holding p.mu across the taskkill call is
-// deliberate: once p.h is closed (by finish(), after Wait completes),
-// Windows can recycle the PID, and an in-flight taskkill /PID lookup could
-// then hit an unrelated process that happened to reuse it. Holding the
-// mutex — and therefore keeping p.h open — for the duration of the
-// subprocess call prevents that race. This cannot deadlock Wait(): Wait's
-// blocking WaitForSingleObject call runs without holding p.mu (see above).
+// already-exited process. Never holds p.mu for the duration of the
+// taskkill subprocess call — only brief lock/unlock pairs at the start and
+// end — so a wedged taskkill.exe (unresponsive process, AV interference —
+// both real on Windows) can never block terminate(), Wait(), or a
+// subsequent kill()/finish() call the way holding the mutex across the
+// call would. Instead, the in-flight call is tracked via p.killing, and
+// closeHandleLocked (called both here and from finish()) only actually
+// closes p.h once every in-flight kill has finished — preventing the
+// PID-reuse race (Windows can recycle a PID once its handle is closed,
+// and a still-in-flight taskkill /PID lookup could then hit an unrelated
+// process) without requiring either side to block waiting for the other.
 //
-// kill itself, however, must not block its CALLER indefinitely: it sits on
+// kill itself must not block its CALLER indefinitely either: it sits on
 // the critical path of CloseSession/Stop, and ServiceShutdown closes
-// sessions sequentially, so one wedged taskkill.exe (unresponsive process,
-// AV interference — both real on Windows) would otherwise hang the whole
-// app's shutdown. The fix is to bound the CALLER's wait without shortening
-// how long p.mu is actually held: the goroutine below takes over ownership
-// of p.mu (Go's sync.Mutex has no goroutine affinity, so unlocking from a
-// different goroutine than the one that locked it is valid) and only
-// releases it once the real killProcessGroup call returns, however long
-// that takes — so finish() (which needs the same mutex to zero p.h) still
-// can never race a still-in-flight taskkill lookup. Only how long kill's
-// caller waits for the *result* is bounded.
+// sessions sequentially, so one wedged taskkill.exe would otherwise hang
+// the whole app's shutdown. conptyKillTimeout bounds only how long the
+// caller waits for the *result* — the background goroutine keeps running
+// (and p.killing stays elevated, deferring the handle close) until the
+// real killProcessGroup call actually returns, however long that takes.
 func (p *conptyProcess) kill() error {
 	p.mu.Lock()
 	if p.h == 0 {
 		p.mu.Unlock()
 		return nil
 	}
+	p.killing++
+	p.mu.Unlock()
 
 	done := make(chan error, 1)
 	go func() {
-		defer p.mu.Unlock()
-		done <- killProcessGroup(p.pid)
+		err := killProcessGroup(p.pid)
+		p.mu.Lock()
+		p.killing--
+		p.closeHandleLocked()
+		p.mu.Unlock()
+		done <- err
 	}()
 
 	select {

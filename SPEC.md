@@ -2,11 +2,11 @@
 
 ## Status
 
-Draft — pending user confirmation before implementation begins.
+**Historical — implemented.** This spec predates implementation and is kept as the original scoping document; it does not reflect the shipped design in every detail (notably the `ptyBackend`/`ptyProcess` interface — see "Superseded by implementation" below). See `tasks/plan.md` and `tasks/todo.md` for what was actually built and verified.
 
 ## Background
 
-`TerminalService`'s PTY layer is split behind a build-tagged `ptyBackend` interface (`pty_backend.go`). The darwin/linux implementation (`pty_backend_unix.go`, `creackPtyBackend`) is real and works, backed by `github.com/creack/pty`. The Windows implementation (`pty_backend_windows.go`, `conptyBackend`) has **never been implemented** — `Start` and `Resize` unconditionally return `"Windows PTY support not yet implemented"` errors; only `Kill` (via `taskkill /F /T /PID <pid>`) has real logic, and it has never been exercised on a real Windows process.
+`TerminalService`'s PTY layer is split behind a build-tagged `ptyBackend` interface (`pty_backend.go`). The darwin/linux implementation (`pty_backend_unix.go`, `creackPtyBackend`) is real and works, backed by `github.com/creack/pty`. The Windows implementation (`pty_backend_windows.go`, `conptyBackend`) **had never been implemented** at spec time — `Start` and `Resize` unconditionally returned `"Windows PTY support not yet implemented"` errors; only `Kill` (via `taskkill /F /T /PID <pid>`) had real logic, and it had never been exercised on a real Windows process. It is now fully implemented, backed by `github.com/charmbracelet/x/conpty` — see `AGENTS.md`'s Tests section.
 
 This gap is already documented in `AGENTS.md`, `CLAUDE.md`, and in full detail in `.planning/milestones/v2.1-phases/25-polish-integration/CHECKPOINT.md` (see "Windows conpty verification" section, decisions D-11 through D-14), which explicitly scoped real Windows conpty support as future work. That checkpoint's "Future work" section is the starting point for this spec, not a constraint we're bound to verbatim (see Tech Stack below on the library choice).
 
@@ -24,7 +24,7 @@ Implement a real Windows ConPTY-backed `ptyBackend` so that `TerminalService` te
 ## Acceptance Criteria
 
 1. On a `windows-latest` CI runner, `go test ./...` passes, including new Windows-tagged tests that exercise the real `conptyBackend` (not the darwin-only mock).
-2. `conptyBackend.Start` spawns a real ConPTY-attached process for the detected shell, returns a `ptyHandle` that supports read/write, and the returned `*exec.Cmd`/process can be waited on and killed.
+2. `conptyBackend.Start` spawns a real ConPTY-attached process for the detected shell, returns a `ptyHandle` that supports read/write, and the returned process (a `ptyProcess`, not an `*exec.Cmd` — ConPTY cannot be driven through `os/exec`, see `tasks/plan.md`) can be waited on and killed.
 3. `conptyBackend.Resize` actually resizes the underlying pseudo-console (not a no-op stub).
 4. `conptyBackend.Kill` reliably terminates the shell process and any children it spawned; existing `taskkill`-based `killProcessGroup` logic is reused unless the chosen library provides an equivalent that's proven better.
 5. `GOOS=windows go build ./...` continues to pass (cross-compile from any dev machine, since no Windows dev machine is available locally).
