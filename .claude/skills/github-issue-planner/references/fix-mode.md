@@ -1,14 +1,30 @@
 # --fix Mode Mechanics
 
-`--fix` implements an already-written plan and opens a draft PR. It never plans from scratch — if no plan exists yet for the target issue, stop and tell the user to run the skill without `--fix` first.
+`--fix` implements an already-written plan and opens a draft PR. It never plans from scratch — if no plan exists *anywhere* for the target issue, stop and tell the user to run the skill without `--fix` first. "Anywhere" is load-bearing: step 1 searches past the current checkout, because a plan sitting on an unmerged branch is still a plan.
 
 ## 1. Resolve the plan
 
-Locate `docs/issue-plans/issue-<N>-*.md`, **excluding any `*.spec.md` file** — that's the escalation spec (see `SKILL.md` Step 8), not the implementation plan, even though it matches the same glob. When an issue was escalated, both files exist side by side; this step always resolves the plan, never the spec. If an issue number wasn't given as an argument, look for plans at status `planned` in `TRIAGE.md`:
+**The plan is often not in the current checkout, and its absence there means nothing.** Mode A lands plans through their own docs PR (`SKILL.md` Step 11), so "committed on a docs branch that hasn't merged yet" is a perfectly normal state — as is planning in one session and running `--fix` in a later one. Check all three locations before concluding anything:
+
+1. **The working tree** — `ls docs/issue-plans/issue-<N>-*.md`
+2. **The default branch** — the fix branch is cut from it, so anything already merged will simply be there once you branch in step 3.
+3. **Any other branch**, including an unmerged docs PR or another issue's fix branch:
+
+```bash
+git fetch origin
+git log --all --oneline --diff-filter=A -- 'docs/issue-plans/issue-<N>-*.md'
+git branch -a --contains <sha-from-above>
+```
+
+If that turns something up, note the branch and keep going — step 6 recovers the file from it. Do **not** stop here.
+
+In all three lookups, **exclude any `*.spec.md` file** — that's the escalation spec (see `SKILL.md` Step 8), not the implementation plan, even though it matches the same glob. When an issue was escalated both files exist side by side; this step always resolves the plan, never the spec.
+
+If an issue number wasn't given as an argument, look for plans at status `planned` in `TRIAGE.md`:
 
 - Exactly one → use it.
 - More than one → list them and ask which to implement.
-- None → tell the user there's nothing queued to fix, and point at the default (plan) mode.
+- **None, and all three lookups above came up empty** → only then tell the user there's nothing queued to fix, and point at the default (plan) mode. Reporting "no plan exists" while one sits on an unmerged branch sends the user off to re-plan work that's already done — and the plan they'd be told to write is the one they already reviewed.
 
 ## 2. Preconditions
 

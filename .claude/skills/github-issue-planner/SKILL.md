@@ -159,7 +159,7 @@ Summarize what was written (triage index, plan files, any spec), flag anything m
 
 Full mechanics, including verification-gate and PR-body details, live in `references/fix-mode.md`. The spine:
 
-1. **Require an existing plan.** `docs/issue-plans/issue-<N>-*.md` must already exist. If it doesn't, stop and say to run the skill without `--fix` first — this mode never plans from scratch.
+1. **Require an existing plan.** `docs/issue-plans/issue-<N>-*.md` must exist — but look beyond the working tree before deciding it doesn't: a plan committed on an unmerged docs branch (Step 11) or on another issue's branch is normal, and `references/fix-mode.md` step 1 gives the cross-branch lookup. Only after all locations come up empty, stop and say to run the skill without `--fix` first — this mode never plans from scratch.
 2. **Check preconditions.** Clean working tree (`git status --porcelain`, tolerating only files under `docs/issue-plans/`), and `gh auth status` passing.
 3. **Branch off the default branch**, prefixed by category (`fix/` for bug, `feat/` for enhancement, `docs/` for documentation, `chore/` otherwise) — matching this repo's existing branch-naming convention.
 4. **Implement task-by-task**, one commit per task, using the incremental-implementation skill's discipline (or `references/fallback-prompts.md` "Fallback C" if that plugin isn't installed): implement, test, verify, commit, move on. Never `git add -A`; stage only what the current task touched.
