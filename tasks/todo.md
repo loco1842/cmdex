@@ -45,7 +45,7 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
 
 ## Phase 2 — ConPTY spike (validate before committing)
 
-- [ ] **2.1** Minimal ConPTY vertical slice on real Windows CI
+- [x] **2.1** Minimal ConPTY vertical slice on real Windows CI
   - Library: **`github.com/charmbracelet/x/conpty` v0.2.0** (decided — see `tasks/plan.md` "Library choice"; `UserExistsError/conpty` rejected because its `Close()` destroys the process handle its own `Wait()` depends on, which directly breaks contract 5/8/9).
   - New `//go:build windows` test file: start a shell, write a command, read output, resize, close, check exit code.
   - Must answer on real hardware (acceptance criteria per risk, ranked by the design review):
@@ -55,6 +55,15 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
     4. *(stretch)* **Write-blocking risk**: paste 1MB into a `pwsh` sitting at `Read-Host`; a concurrent `Resize` on that session must still return within 500ms (Write runs under `ss.mu` — a full pipe would wedge the session).
   - Acceptance: all four questions answered by the Windows CI run.
   - Verify: Windows CI run log. If risk 1 or 2 comes back bad, stop and reconsider before Phase 3 — these are correctness-blocking, not polish.
+  - **Done, scoped to what a raw-library spike can actually answer** (items 1 and 2 above — teardown/deadlock and exit-code fidelity, the two the plan flagged as correctness-blocking): `pty_backend_windows_conpty_spike_test.go` drives `conpty.New`/`Spawn`/`Read`/`Write`/`Resize`/`Close` directly against real `cmd.exe`, not through `TerminalService`/`CreateSession` — that integration doesn't exist until Phase 3, so items 3 (cwd/argv fidelity via `TerminalService`) and 4 (write-blocking under `ss.mu`) are deferred to Phase 3's real test suite (task 3.2), where `TerminalService` actually exists to test against. Five tests added:
+    - `TestConptySpike_CloseUnblocksRead` — blocks a `Read()` on an idle interactive `cmd.exe`, then `Close()`s and asserts the read returns within 5s.
+    - `TestConptySpike_ExitCodeNormal` — `cmd /c exit 7` → `WaitForSingleObject` + `GetExitCodeProcess` must report exactly `7`.
+    - `TestConptySpike_ExitCodeAfterTerminate` — external `TerminateProcess(h, 1)` (standing in for `conptyBackend.Kill`) → exit code must still be `1`, not hang or error.
+    - `TestConptySpike_ReadNeverBusySpins` — reads a `dir /s` burst on its own goroutine with an 8s overall timeout; fails only if `(0, nil)` streaks past 3 in a row mid-burst (hitting the timeout after the burst ends is expected and passes, per the "pipe doesn't break on child exit" finding).
+    - `TestConptySpike_FullCycle` — Start → Write `echo <marker>` → Read until marker observed → `Resize(120,40)` → Write `exit 0` → Wait → assert exit code `0`.
+  - **Result: all 5 tests passed on real Windows CI** (`ok cmdex 8.488s`, zero failures) — `charmbracelet/x/conpty` behaves exactly as the design review predicted: `Close()` reliably unblocks a pending `Read()`, exit codes are trustworthy in both the normal-exit and post-`TerminateProcess` cases, and no busy-spin was observed.
+  - Verified: `GOOS=windows go build/vet` clean; Windows test binary compiles (`go test -c`); `go build`/`go vet`/`go test ./...` clean on macOS (63/63, unaffected); `make check` + `make lint` clean; `go mod tidy` minimal diff (`golang.org/x/sys` promoted from indirect since the spike imports it directly).
+  - **→ Checkpoint 2 CONFIRMED on real CI** — workflow run [31874008566](https://github.com/loco1842/cmdex/actions/runs/31874008566): `Type check`, `Test`, `Test (Windows)`, and all three `Build check` platforms all green, plus the spike itself passed. Proceeding to Phase 3 with the library choice validated on real hardware, not just by reading source.
   - **→ Checkpoint 2** (re-confirm direction with user only if the spike contradicts the design review's analysis)
 
 ## Phase 3 — Full Windows implementation
