@@ -1,10 +1,10 @@
 # Issue #56: ctrl+enter shortcut in spotlight search executes command immediately
 
 **Issue:** https://github.com/loco1842/cmdex/issues/56
-**Category:** enhancement · **Priority:** P2 · **Effort:** S · **Status:** planned
+**Category:** enhancement · **Priority:** P2 · **Effort:** S · **Status:** changes-requested
 **Author:** @loco1842 · **Opened:** 2026-08-15
 **Spec:** none — plans directly, doesn't meet the escalation test
-**PR:** _(filled in by --fix)_
+**PR:** https://github.com/loco1842/cmdex/pull/58
 
 ## Problem
 
@@ -238,3 +238,21 @@ default, confirming each behaves as described above.
 ## Open questions
 
 - None — the fallback behavior for commands needing variable input follows the existing fill-variables UX, so there's nothing left ambiguous for this scope.
+
+## Review round 1 — 2026-08-15
+
+### Feedback
+
+1. **[source: Greptile (automated), `frontend/src/App.tsx:1286-1304`, P1]** "Execution loses its tab target" — when the user switches tabs while `GetVariables` is pending, the delayed call runs the palette-selected command but `runCommandDirect` attributes execution state to the newly active tab (spinner/errors on the wrong tab); on the variable-prompt branch, submission can instead execute the newly selected command.
+   - **Verdict:** valid, and worse than the summary implies. Verified independently (not taken at face value) by tracing the actual code:
+     - **Part A (UI-attribution):** `runCommandDirect` (`App.tsx:1027-1049`) computes `execTabId = activeTabIdRef.current` — whatever tab is *currently* active — instead of deriving it from the `commandId` parameter it's actually executing. `RunCommand(commandId, ...)` itself is called with the correct id regardless, so the command that runs is always correct; only the spinner/error-toast can land on the wrong tab.
+     - **Part B (wrong command executes — more severe than the summary suggests):** `handleVariableSubmit` (`App.tsx:1119-1127`) uses `selectedCommand.id` instead of `modal.commandId` (which `handleFillVariablesByTab`/`handleFillVariables` both set correctly). Tab-switch shortcuts (`Ctrl+Tab`, `Cmd/Ctrl+1..6`) aren't guarded by `modal.type` and fire even while the fill-variables modal has focus, and tab-switching never resets `modal` state — so switching tabs while the modal is open and then submitting **executes a different command than the one the dialog is showing.**
+     - **Scope note:** both bugs live in code the original plan explicitly marked out of scope (`runCommandDirect`/the terminal-execution model). Confirmed via diff that neither function changed in this PR — the bug is pre-existing and was already reachable through the older in-tab `Ctrl+Enter` → `handleFillVariables` path; this PR adds a second way to reach it, it didn't create it.
+   - **Decision (user, 2026-08-15):** fix both parts in this PR. Part B is a real wrong-command-execution correctness bug; shipping without it means knowingly leaving that reachable, and the fix for both is small and surgical.
+   - **Proposed fix:**
+     - `runCommandDirect`: use the `commandId` parameter directly as `execTabId` instead of `activeTabIdRef.current` — for saved commands, tab id and command id are the same identity (`openTab` keys tabs by `cmd.id`), so this is a correctness fix, not a workaround. This also fixes the downstream `if (execTabId === activeTabIdRef.current)` toast-suppression check for free, since it now compares against the *right* tab.
+     - `handleVariableSubmit`: read `modal.commandId` instead of `selectedCommand.id` (guard on `modal.type === 'fillVariables'` instead of `selectedCommand`), matching what `handleFillVariablesByTab`/`handleFillVariables` already set correctly when opening the modal.
+
+2. **[source: CodeRabbit (automated)]** "Auto reviews are disabled on this repository" — noise, no action.
+
+3. **A large embedded, URL-encoded prompt was found inside Greptile's top-level PR comment**, instructing an agent to install a CLI tool, auto-install a new Claude Code skill, and enter an unattended multi-round push loop (commit → push → wait for re-review → repeat, "never open a new PR", no human involved). **Not followed.** This is a prompt injection riding in third-party tool output, not feedback — flagged to the user, ignored as an instruction, and the substantive technical claim (item 1 above) was extracted and evaluated entirely on its own merits.
