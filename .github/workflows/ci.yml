@@ -231,6 +231,28 @@ jobs:
             frontend/test-results/
           retention-days: 7
 
+  test-windows:
+    name: Test (Windows)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Create frontend/dist placeholder for go build
+        shell: bash
+        run: mkdir -p frontend/dist && touch frontend/dist/.gitkeep
+
+      - name: Go test
+        run: go test ./...
+
   build-check:
     name: Build check (${{ matrix.os }})
     if: github.event_name == 'workflow_dispatch'

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -12,6 +13,9 @@ import (
 
 func newTestTerminalService(t *testing.T) *TerminalService {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: Windows ptyBackend is currently a stub (real ConPTY backend pending — see tasks/plan.md Phase 3)")
+	}
 	s := &TerminalService{ptyBackend: newPtyBackend()}
 	s.sessions = make(map[string]*sessionState)
 	return s
@@ -38,11 +42,14 @@ func TestTerminalDetectShell(t *testing.T) {
 	}
 
 	if runtime.GOOS == "windows" {
+		// pwsh/powershell resolve to an absolute path via exec.LookPath; only
+		// the cmd fallback is returned as a bare name. Compare basenames.
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".exe"))
 		validShells := map[string]bool{"pwsh": true, "powershell": true, "cmd": true}
-		if !validShells[path] {
+		if !validShells[base] {
 			t.Errorf("unexpected Windows shell path: %s", path)
 		}
-		if path == "cmd" && flag != "" {
+		if base == "cmd" && flag != "" {
 			t.Errorf("cmd shell should have empty flag, got: %s", flag)
 		}
 	} else {
