@@ -2,10 +2,10 @@
 
 _Last updated: 2026-08-15 · repo: loco1842/cmdex · 2 open issues_
 
-| # | Title | Category | Priority | Effort | Plan | Status |
-|---|-------|----------|----------|--------|------|--------|
-| [56](https://github.com/loco1842/cmdex/issues/56) | ctrl+enter shortcut in spotlight search executes command immediately | enhancement | P2 | S | [plan](issue-56-ctrl-enter-spotlight.md) | pr-open — [PR #58](https://github.com/loco1842/cmdex/pull/58) |
-| [57](https://github.com/loco1842/cmdex/issues/57) | terminal setting in system settings no longer used | bug _(recategorized — see note)_ | P2 | L _(revised up from M once full removal scope was grounded)_ | [plan](issue-57-terminal-setting-removal.md) · [spec](issue-57-terminal-setting-removal.spec.md) | pr-open — [PR #59](https://github.com/loco1842/cmdex/pull/59) |
+| # | Title | Category | Priority | Effort | Plan | PR | Status |
+|---|-------|----------|----------|--------|------|----|--------|
+| [56](https://github.com/loco1842/cmdex/issues/56) | ctrl+enter shortcut in spotlight search executes command immediately | enhancement | P2 | S | [plan](issue-56-ctrl-enter-spotlight.md) | [#58](https://github.com/loco1842/cmdex/pull/58) | pr-open |
+| [57](https://github.com/loco1842/cmdex/issues/57) | terminal setting in system settings no longer used | bug _(recategorized — see note)_ | P2 | L _(revised up from M once full removal scope was grounded)_ | [plan](issue-57-terminal-setting-removal.md) · [spec](issue-57-terminal-setting-removal.spec.md) | [#59](https://github.com/loco1842/cmdex/pull/59) | pr-open |
 
 ## Notes
 

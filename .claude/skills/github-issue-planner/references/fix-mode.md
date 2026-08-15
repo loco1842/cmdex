@@ -73,10 +73,10 @@ cd frontend && pnpm test:e2e
 
 ## 6. Commit the plan (and spec) into this branch
 
-The plan file (and its spec, if the issue was escalated) lives under `docs/issue-plans/` wherever it was originally written — often a different branch, or still uncommitted in whatever context wrote it. It will **not** exist on the fix branch unless you copy it over explicitly. Resolve the actual source concretely rather than treating it as a fill-in-the-blank — where it is depends on how you got here:
+The fix branch is cut from the default branch, so if the plan already landed there (Mode A Step 11) it's simply present — nothing to copy, skip to step 7. Otherwise it exists only as an uncommitted draft or on another branch, and won't be on the fix branch unless you copy it explicitly. Resolve the source concretely rather than treating it as a fill-in-the-blank:
 
-- **Still in this same session's working tree** (the common case: Mode A ran earlier in the same conversation) — it's sitting uncommitted in whatever checkout that was (e.g. the main checkout you branched or worktree'd from). Use that real path.
-- **Already committed on another branch** — pull it without needing that branch checked out here: `git show <that-branch>:docs/issue-plans/issue-<N>-<slug>.md > /tmp/plan-<N>.md`.
+- **Uncommitted in this session's working tree** (Mode A ran earlier in the same conversation but its plans weren't landed) — it's sitting in whatever checkout that was, e.g. the main checkout you branched or worktree'd from. Use that real path.
+- **Committed on another branch** — pull it without checking that branch out: `git show <that-branch>:docs/issue-plans/issue-<N>-<slug>.md > /tmp/plan-<N>.md`.
 
 ```bash
 mkdir -p docs/issue-plans
@@ -161,9 +161,12 @@ Never pass anything other than `--draft`. Never call `gh pr merge`, `gh pr ready
 
 ## 10. Close the loop
 
-- Update the issue's row in `docs/issue-plans/TRIAGE.md`: status → `pr-open`, add the PR link.
-- Stamp the PR URL into the plan file's `**PR:**` header field (in whatever copy is the source of truth — the fix branch's copy doesn't need a self-referential update).
-- **Commit and push this update wherever you made it.** This isn't optional bookkeeping — until it's on a remote, the loop isn't actually closed, and these edits are easy to lose: they're typically made outside the fix branch itself (in the main checkout, or wherever Mode A originally ran), so nothing about finishing the fix branch's own push automatically carries them anywhere. In the parallel-worktree flow this matters even more — see step 4 below.
+The canonical copies of `TRIAGE.md` and the plan file live on the default branch (see `SKILL.md` Step 11). The fix branch carries its own copy of the plan, but that's a snapshot the PR was opened against — it isn't the record you keep updating.
+
+- Update the issue's row in `docs/issue-plans/TRIAGE.md`: status → `pr-open`, PR link in the `PR` column.
+- Stamp the PR URL into the canonical plan file's `**PR:**` header field. The fix branch's copy doesn't need a self-referential update.
+- **Land those edits on the default branch the same way Step 11 of Mode A does — via a short-lived docs branch and its own PR, with its own confirmation before pushing.** Never commit or push them straight to the default branch, and never treat the fix branch's earlier confirmation as covering this push too: it's a separate push, of different content, to a different branch, and it needs its own approval. It's easy to get this wrong because these edits are usually made outside the fix branch (in the main checkout, or wherever Mode A ran), so nothing about finishing the fix branch carries them anywhere automatically — but "it needs to get pushed" is not a license to bypass the gate.
+- Until that docs PR lands, say so plainly rather than implying the loop is fully closed.
 - Report the PR URL to the user and stop. Do not comment on the GitHub issue itself unless asked.
 
 ## Parallelizing across multiple issues
@@ -186,10 +189,10 @@ Once a subagent reports back, run steps 6-10 **yourself**, from your own shell, 
 1. Commit the plan/spec into the branch (step 6).
 2. Re-verify independently (step 7) — don't skip this just because it ran unattended.
 3. Push and open the draft PR only after showing the user the diff and getting confirmation (step 8) — this has to reach an actual human, which a background subagent cannot obtain on its own.
-4. Update `TRIAGE.md` and the plan file **in your own shell, not inside the worktree** — then commit and push that update (step 10) *before* removing the worktree:
+4. Update `TRIAGE.md` and the canonical plan file **in your own shell, not inside the worktree**, and land them via the docs-branch PR (step 10) — then remove the worktree:
    ```bash
    git worktree remove ../<repo>-issue-<N>
    ```
-   Removing the worktree discards anything left uncommitted inside it — if the close-loop edits were made there instead of in your own shell, they're gone the moment this command runs.
+   Removing the worktree discards anything left uncommitted inside it — if the close-loop edits were made there instead of in your own shell, they're gone the moment this command runs. Batch every parallel issue's close-loop edits into one docs PR rather than opening one per issue.
 
 If two issues' plans touch overlapping files, don't parallelize those two — implement them sequentially so the second one is grounded in the first one's actual result rather than a plan written against a codebase that already changed underneath it.
