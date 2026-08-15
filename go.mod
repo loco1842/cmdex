@@ -3,10 +3,12 @@ module cmdex
 go 1.26.0
 
 require (
+	github.com/charmbracelet/x/conpty v0.2.0
 	github.com/creack/pty v1.1.24
 	github.com/google/cel-go v0.31.0
 	github.com/google/uuid v1.6.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.8
+	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.56.0
 )
 
@@ -25,7 +27,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260810151157-a8b543ca52da // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260810153831-ec0a7760b754 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260810153831-ec0a7760b754 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
