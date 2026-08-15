@@ -247,7 +247,7 @@ Cmdex is a cross-platform desktop app for saving, organizing, and executing CLI 
 - Go matching `go.mod` (1.26.x).
 - Wails v3 CLI, pinned to `v3.0.0-beta.8` (see `docs/GETTING-STARTED.md`).
 - Node.js 24.x (matches CI) and pnpm.
-- macOS / Linux / Windows for full parity with terminal-launch paths in `executor.go` (Windows `conpty` backend is currently a stub — see `AGENTS.md` Tests section).
+- macOS / Linux / Windows for full parity with terminal-launch paths in `executor.go` (Windows PTY backend is real, via `github.com/charmbracelet/x/conpty` — see `AGENTS.md` Tests section and Known Cross-Platform Gaps for a few adjacent, unrelated issues found along the way).
 - Desktop targets built via Wails; artifacts produced by local `wails3 build`/`task package` or the GitHub Actions release workflow (`.github/workflows/release.yml`).
 <!-- GSD:stack-end -->
 
