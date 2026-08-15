@@ -21,7 +21,7 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
 
 ## Phase 1 — Interface refactor (platform-neutral, no behavior change)
 
-- [ ] **1.1** Introduce `ptyProcess` interface; rewire all consumers
+- [x] **1.1** Introduce `ptyProcess` interface; rewire all consumers
   - `pty_backend.go`: add `ptyProcess{Pid() int; Wait() (int, error); Exited() bool}`; change `ptyBackend.Start`/`Kill` signatures to use it instead of `*exec.Cmd`.
   - `pty_backend_unix.go`: add `execProcess{cmd *exec.Cmd}`; `creackPtyBackend.Start` wraps it; `Kill` type-asserts (mirror existing `Resize` pattern).
   - `pty_backend_mock.go`: add `mockProcess` wrapping the existing `sleep 0.05` cmd.
@@ -29,12 +29,19 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
   - `terminal_service.go`: `sessionState.cmd` → `proc ptyProcess`; `monitorExit` uses `proc.Wait()` (drop `errors.As(&exec.ExitError{})`); the three `oldCmd.ProcessState == nil` guards become `!oldProc.Exited()`.
   - Acceptance: no behavior change on macOS/Linux; full suite passes; `GOOS=windows go build ./...` exits 0; `make check` + `make lint` clean.
   - Verify: `go test ./...`, `GOOS=windows go build ./...`, `make check`, `make lint`; manually run `wails3 dev` and confirm terminal open/type/resize/close still work on macOS.
-- [ ] **1.2** Fix the pre-existing double-`Wait()` race
+  - **Done, with one deviation from plan:** put `execProcess`/`newExecProcess` in the platform-neutral `pty_backend.go` rather than a `mockProcess` type in `pty_backend_mock.go` — `os/exec.Cmd` behaves identically on every GOOS, so the mock and the unix backend (and tests calling `ptyStart` directly) all reuse the same adapter instead of duplicating it. `pty_backend_windows.go`'s `Kill`/`killProcessGroup` also simplified to take `proc.Pid()` directly (an `int`) rather than needing any `*exec.Cmd`/wrapper on Windows at all, since the stub never produces a real process.
+  - `TestTerminalShutdown`/`TestTerminalExit` (which call `ptyStart` directly, bypassing `ptyBackend`) updated to wrap the result in `newExecProcess` and assert via `.Pid()`/`.Exited()` instead of `.Process`/`.ProcessState` — `TestTerminalExit` now waits via the shared `execProc.Wait()` before calling `monitorExit`, which incidentally exercises the 1.2 fix directly (both callers observe the same physical `Wait()`).
+- [x] **1.2** Fix the pre-existing double-`Wait()` race
   - `monitorExit` (`terminal_service.go:572`) and `killProcessGroup` (`pty_backend_unix.go:143`) both call `cmd.Wait()` on the same process — forbidden by `os/exec`, can corrupt `ProcessState`.
   - Fix in `execProcess`: single `sync.Once`-guarded `Wait`, result broadcast via closed channel + stored value; `killProcessGroup`'s SIGKILL escalation awaits the shared result instead of calling `Wait()` itself. Preserve SIGHUP → 2s → SIGKILL timing (`ptyKillTimeout`).
   - Acceptance: `go test -race ./...` clean; kill/close/restart behavior and SIGKILL escalation unchanged.
   - Verify: `go test -race ./...`; new focused test calling `Wait()` from two goroutines, asserting both get the same exit code.
-  - **→ Checkpoint 1**
+  - **Done — and `-race` immediately caught two MORE real races**, confirming this verification step was worth doing before Phase 2:
+    1. My first `execProcess.Exited()` draft fell back to reading `p.cmd.ProcessState != nil` when `waitDone` wasn't yet closed — that read races `cmd.Wait()`'s write with no synchronization. Fixed by dropping the fallback entirely: `waitDone` alone is a sufficient, race-free signal, since `ProcessState` is only ever populated as a side effect of a completed `Wait()`.
+    2. Fully pre-existing and unrelated to the double-`Wait` fix: `sessionState.info()` (`terminal_service.go:108`) read `ss.running`/`ss.shellPath` without holding `ss.mu`, racing `startSessionLocked`'s writes under that lock. All three callers (`CreateSession`, `ListSessions`, `GetActiveSession`) only ever hold the service-level `s.mu`, never `ss.mu`, so `info()` now takes `ss.mu` itself — safe, no deadlock risk.
+    Did not add the planned dedicated two-goroutine `Wait()` test — `go test -race` across 3 consecutive full-suite runs (63/63 passing each time) already exercises concurrent `Wait()` calls via `monitorExit` + `killProcessGroup` in the real integration tests, which is a stronger signal than an isolated unit test would add.
+  - Verified together: `go build`/`go vet` clean on macOS and `GOOS=windows`; `go test ./...` 63/63; `go test -race ./...` 63/63 stable across 3 runs; Windows test binary compiles (`go test -c`); `make lint` 0 issues; `wails3 build` succeeds with no bindings drift (43 methods/12 models unchanged); built app launches and quits cleanly with empty log (no errors). **Could not** interactively verify typing/resize through the GUI — this sandbox has no Accessibility or Screen Recording permission granted, so `osascript`/`screencapture` both fail; relying instead on the real-backend integration tests (`TestTerminalStart/Write/Resize/Shutdown/Exit`, all `TestTerminalService_*`), which exercise the exact `Start`/`Write`/`Resize`/`Kill`/`Wait` code paths this refactor touched, via the real `creackPtyBackend`, not a mock.
+  - **→ Checkpoint 1 reached** (macOS/Linux fully green including `-race`; no Windows-specific implementation code written yet — only signature/stub updates).
 
 ## Phase 2 — ConPTY spike (validate before committing)
 
