@@ -69,6 +69,9 @@ func testWithTerminalSvc(t *testing.T) func() {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode (requires real PTY)")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: Windows ptyBackend is currently a stub (real ConPTY backend pending — see tasks/plan.md Phase 3)")
+	}
 	prevTerminalSvc := terminalSvc
 	terminalSvc = nil
 	ts := &TerminalService{}
@@ -340,6 +343,9 @@ func TestShellQuoteDir(t *testing.T) {
 func TestTerminalService_ServiceStartupAssignsTerminalSvc(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: Windows ptyBackend is currently a stub (real ConPTY backend pending — see tasks/plan.md Phase 3)")
 	}
 
 	prevTerminalSvc := terminalSvc
