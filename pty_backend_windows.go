@@ -169,6 +169,7 @@ type conptyProcess struct {
 	waitOnce sync.Once
 	waitDone chan struct{}
 	code     int
+	waitErr  error
 }
 
 func newConptyProcess(pid int, handle windows.Handle) *conptyProcess {
@@ -178,14 +179,21 @@ func newConptyProcess(pid int, handle windows.Handle) *conptyProcess {
 func (p *conptyProcess) Pid() int { return p.pid }
 
 // Wait blocks until the process exits and reports its exit code. Safe to
-// call concurrently or repeatedly — only the first call actually waits.
+// call concurrently or repeatedly — only the first call actually waits,
+// and every caller (including repeated calls) observes the identical
+// cached (exitCode, err) result.
 //
-// On any syscall error, this reports (0, nil) rather than a non-zero code or
-// an error: contract 9 (see tasks/plan.md) requires a trustworthy signal
-// here because monitorExit treats a non-zero/errored result as a crash and
-// auto-restarts after 100ms — a wrong signal on every future call would be
-// an infinite restart loop, whereas reporting a false "clean exit" costs at
-// most one missed auto-restart.
+// On a WaitForSingleObject/GetExitCodeProcess syscall failure, the real
+// error is returned (rather than swallowed to nil) so this method doesn't
+// lie about a failure having occurred, matching execProcess's equivalent
+// handling on unix (pty_backend.go). exitCode is still reported as 0 in
+// this case, deliberately NOT repurposed to signal the failure (e.g. to
+// -1): monitorExit (terminal_service.go) discards Wait's error return
+// entirely and decides "crash vs. intentional exit" from exitCode alone,
+// so if this exceedingly rare syscall failure ever happened on every
+// session across repeated auto-restarts, treating it as a crash would risk
+// an infinite restart loop, whereas exitCode == 0 costs at most one missed
+// auto-restart.
 func (p *conptyProcess) Wait() (int, error) {
 	p.waitOnce.Do(func() {
 		defer close(p.waitDone)
@@ -194,37 +202,38 @@ func (p *conptyProcess) Wait() (int, error) {
 		h := p.h
 		p.mu.Unlock()
 		if h == 0 {
-			p.finish(0)
+			p.finish(0, nil)
 			return
 		}
 
 		if _, err := windows.WaitForSingleObject(h, windows.INFINITE); err != nil {
 			fmt.Printf("conptyProcess.Wait: WaitForSingleObject(pid=%d): %v\n", p.pid, err)
-			p.finish(0)
+			p.finish(0, fmt.Errorf("conptyProcess.Wait: WaitForSingleObject(pid=%d): %w", p.pid, err))
 			return
 		}
 
 		var code uint32
 		if err := windows.GetExitCodeProcess(h, &code); err != nil {
 			fmt.Printf("conptyProcess.Wait: GetExitCodeProcess(pid=%d): %v\n", p.pid, err)
-			p.finish(0)
+			p.finish(0, fmt.Errorf("conptyProcess.Wait: GetExitCodeProcess(pid=%d): %w", p.pid, err))
 			return
 		}
-		p.finish(int(code))
+		p.finish(int(code), nil)
 	})
 	<-p.waitDone
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.code, nil
+	return p.code, p.waitErr
 }
 
-// finish records the exit code and, unless a kill() call is still in
+// finish records the exit code/error and, unless a kill() call is still in
 // flight, closes the process handle. It only ever runs after
 // WaitForSingleObject has returned. Never blocks — see closeHandleLocked.
-func (p *conptyProcess) finish(code int) {
+func (p *conptyProcess) finish(code int, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.code = code
+	p.waitErr = err
 	p.exited = true
 	p.closeHandleLocked()
 }

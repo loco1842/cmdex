@@ -67,8 +67,16 @@ func TestConptyBackend_WriteReadRoundTrip(t *testing.T) {
 	}()
 
 	const marker = "cmdex-windows-roundtrip-marker"
-	if _, err := handle.Write([]byte("echo " + marker + "\r\n")); err != nil {
-		t.Fatalf("Write failed: %v", err)
+	cmd := []byte("echo " + marker + "\r\n")
+	for len(cmd) > 0 {
+		n, err := handle.Write(cmd)
+		if err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+		if n == 0 {
+			t.Fatalf("Write made no progress (0 bytes, no error) with %d bytes remaining", len(cmd))
+		}
+		cmd = cmd[n:]
 	}
 
 	chunks := make(chan []byte, 16)
@@ -276,6 +284,59 @@ func TestConptyProcess_ConcurrentWaitReturnsSameResult(t *testing.T) {
 	}
 	if codes[0] != 7 {
 		t.Errorf("exit code = %d, want 7", codes[0])
+	}
+}
+
+// TestConptyProcess_WaitForSingleObjectFailure verifies Wait() returns the
+// real WaitForSingleObject error rather than swallowing it to nil (see
+// Wait's doc comment in pty_backend_windows.go for why exitCode still
+// reports 0 in this path regardless). Constructs a conptyProcess directly
+// around a handle value that isn't a live process — WaitForSingleObject
+// fails immediately on it rather than blocking, so this doesn't require a
+// real child process at all.
+func TestConptyProcess_WaitForSingleObjectFailure(t *testing.T) {
+	p := newConptyProcess(0, windows.Handle(0xDEADBEEF))
+
+	code, err := p.Wait()
+	if err == nil {
+		t.Fatal("Wait() with an invalid handle returned a nil error, want the real WaitForSingleObject failure")
+	}
+	if code != 0 {
+		t.Errorf("exitCode = %d, want 0", code)
+	}
+	if !p.Exited() {
+		t.Error("Exited() = false after Wait() completed")
+	}
+
+	code2, err2 := p.Wait()
+	if code2 != code || err2 != err {
+		t.Errorf("second Wait() call returned (%d, %v), want the identical cached result (%d, %v)", code2, err2, code, err)
+	}
+}
+
+// TestConptyProcess_GetExitCodeProcessFailure verifies Wait() returns the
+// real GetExitCodeProcess error rather than swallowing it to nil, exercised
+// independently of TestConptyProcess_WaitForSingleObjectFailure above: an
+// already-signaled event handle makes WaitForSingleObject succeed
+// immediately (it isn't a process handle, so GetExitCodeProcess on it fails
+// distinctly), reaching the second failure branch specifically.
+func TestConptyProcess_GetExitCodeProcessFailure(t *testing.T) {
+	h, err := windows.CreateEvent(nil, 1, 1, nil)
+	if err != nil {
+		t.Fatalf("CreateEvent failed: %v", err)
+	}
+
+	p := newConptyProcess(0, h)
+
+	code, waitErr := p.Wait()
+	if waitErr == nil {
+		t.Fatal("Wait() with a non-process handle returned a nil error, want the real GetExitCodeProcess failure")
+	}
+	if code != 0 {
+		t.Errorf("exitCode = %d, want 0", code)
+	}
+	if !p.Exited() {
+		t.Error("Exited() = false after Wait() completed")
 	}
 }
 
