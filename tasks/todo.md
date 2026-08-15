@@ -112,6 +112,32 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
 - `executor.go`'s `shellQuoteDir`: always uses POSIX single-quote escaping for the `cd '<dir>' && ...` prefix `RunCommand` builds — meaningless to cmd.exe/PowerShell. Found during Phase 3; `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` are Windows-skipped because of it.
 - **Flagged, not decided:** after a clean shell exit, `monitorExit` returns without ever closing `ss.ptmx`. Harmless-ish fd behavior on macOS/Linux; on Windows it holds a live `conhost.exe` alive until the session restarts or closes. Fixing it touches `terminal_service.go`'s intentional-exit branch, which Phase 1 is scoped to leave behavior-unchanged on macOS/Linux — so this needs an explicit call from the user (fast-follow vs. fold into Phase 3) rather than silently doing it. **Still open** — not addressed anywhere in Phases 1–4.
 
-## Plan status: all four phases complete, all four checkpoints confirmed on real CI
+## Phase 5 — /ship review fixes
 
-Windows terminal sessions now work end-to-end (start, type, see output, resize, close) via a real `github.com/charmbracelet/x/conpty`-backed implementation, verified on real Windows hardware through this repo's CI. Three items remain deliberately open, listed above: the `ss.ptmx`-not-closed-on-clean-exit fd/conhost leak (flagged for a user decision, never made unilaterally), and the two pre-existing cross-platform gaps in command construction (`buildPtyEnv`, `shellQuoteDir`) documented in `AGENTS.md`.
+A `/ship` fan-out review (parallel `code-reviewer` + `security-auditor` + `test-engineer` agents against the branch at commit `17c51e5`) returned verdict **NO-GO**, close to shippable. This phase addresses every blocker and recommended fix from that review.
+
+- [x] **5.0** Commit the pending `releaseOldProcess`/`monitorExit` simplification
+  - The `code-reviewer` agent independently caught (and `git status` confirmed) that a prior code-simplification pass was sitting uncommitted in the working tree — meaning the "verified by CI" story didn't cover the code actually on disk.
+  - **Done:** commit `cb63713`.
+- [x] **5.1** Add `-race` to both CI `go test` steps
+  - Neither the regular `test` job nor `test-windows` ran `-race` — the exact flag that caught the original double-`Wait()` bug during development, and the only verification channel for Windows concurrency claims (no local Windows machine).
+  - **Done:** commit `cb95afe`. Discovered via research (not by burning a CI round-trip) that `-race` requires cgo, and GitHub's `windows-latest` runners ship MinGW-w64 but don't put it on `PATH` by default — added a step to do so plus `CGO_ENABLED=1` on the Windows job (commit `df5187c`).
+- [x] **5.2** Concurrent-`Wait()` tests (the Critical finding)
+  - `conptyProcess.Wait()`'s `sync.Once` guard was never called concurrently anywhere — not in production (`conptyBackend.Kill` deliberately never reaps) and not in any test. The Unix `execProcess` had the same gap in isolation, only incidentally covered via `-race` across the integration suite.
+  - **Done:** `pty_backend_unix_test.go` (new, `//go:build !windows`) — `TestExecProcess_ConcurrentWaitReturnsSameResult`, commit `8452fae`. `pty_backend_windows_test.go` — `TestConptyProcess_ConcurrentWaitReturnsSameResult` (spawns via `conptyStart` + `cmdExePath` directly, same pattern as `TestConptyStart_RejectsInvalidDimensions`), commit `7794f84`.
+- [x] **5.3** Direct `conptyHandle.Close()`-unblocks-`Read()` test (the Medium finding)
+  - The Phase 2 spike only proved this for the raw `conpty` library, not the shipped `conptyHandle` wrapper; the existing integration test would only manifest a failure as a timeout, not a specific signal.
+  - **Done:** `pty_backend_windows_test.go` — `TestConptyHandle_CloseUnblocksRead`, commit `7794f84`.
+- [x] **5.4** Bound `conptyProcess.kill()`'s `taskkill` call (the Important finding)
+  - `kill()` held `p.mu` for the full unbounded duration of the `taskkill` subprocess call; since `ServiceShutdown` closes sessions sequentially, one wedged `taskkill.exe` would hang the whole app's shutdown on Windows.
+  - **Done:** commit `5c74356`. Fix transfers `p.mu` ownership into the background goroutine that runs the real `killProcessGroup` call — `kill()`'s caller is bounded by the new `conptyKillTimeout` (2s), but the mutex isn't released until the real `taskkill` call actually finishes, however long that takes, so the PID-reuse-race protection is unweakened (only how long the *caller* waits for the result is bounded).
+- [x] **5.5** Harden the `cmd.exe` fallback path (the Low finding)
+  - `conptyStart`'s `"cmd"` fallback resolved via `exec.LookPath("cmd")` rather than the hardcoded `%SystemRoot%\System32` path already used correctly for `taskkill` — a narrow window where a failed/hijacked PATH lookup could resolve to an untrusted binary (`charmbracelet/x/conpty` resolves an unresolved bare name relative to the session's working directory).
+  - **Done:** commit `5c74356` (same commit as 5.4). Generalized `taskkillPath()` → `sysRootPath(name string) string`; `conptyStart` now falls back to `sysRootPath("cmd.exe")` when `exec.LookPath("cmd")` fails.
+- [ ] **5.6** Trigger Windows CI once to confirm the full batch
+  - Verify: `go build`/`go vet` clean (native + `GOOS=windows`), `go test -race ./...` 64/64 on macOS, `gofmt -l`/`make lint` clean — all confirmed locally. Real Windows CI run pending.
+  - **→ Checkpoint 5**: pending — will record the run link here once triggered.
+
+## Plan status: Phases 0–4 complete and CI-confirmed; Phase 5 (ship-review fixes) implemented, Windows CI verification pending
+
+Windows terminal sessions work end-to-end (start, type, see output, resize, close) via a real `github.com/charmbracelet/x/conpty`-backed implementation, verified on real Windows hardware through this repo's CI. Two items remain deliberately open (unchanged from before Phase 5, not addressed by it): the `ss.ptmx`-not-closed-on-clean-exit fd/conhost leak (flagged for a user decision, never made unilaterally), and the two pre-existing cross-platform gaps in command construction (`buildPtyEnv`, `shellQuoteDir`) documented in `AGENTS.md`.
