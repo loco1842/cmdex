@@ -18,6 +18,8 @@ Exclude `diffray-*` labels from triage entirely — they're review-automation st
 
 If an issue carries none of these, or a repo has an entirely different taxonomy, infer the closest category from the title and body and note it plainly rather than forcing a bad fit.
 
+**A label is a claim, not a fact.** Reporters (and auto-labelers) mis-tag issues — something filed as `question` or `enhancement` can turn out, once you actually read the code, to be a confirmed regression. If premise verification (below) contradicts the applied label, recategorize based on the evidence and say so plainly in `TRIAGE.md`'s notes, citing what you found. Don't let a pre-existing label substitute for checking.
+
 ## Priority
 
 Assign from impact × reach first; use effort only to break ties.
@@ -65,6 +67,8 @@ Before writing a plan (SKILL.md Step 9), confirm the issue is still an accurate 
 | **question / duplicate / invalid** | These rarely warrant a plan at all — confirm which one it actually is (answer it, point at the duplicate, or explain why it's invalid) rather than planning around an unclear ask. |
 
 Evidence goes in the plan's Verification section as a citation (`file.ext:line`, a commit hash, or a described repro) — not as "confirmed" with nothing backing it up.
+
+For anything beyond a one-line grep — an empty issue body, an unfamiliar area of the codebase, or a claim that needs git-history archaeology to confirm (was this already fixed? when did it break?) — delegate the research to a subagent rather than skimming it inline. A dedicated research pass is what turns up the things a quick look misses: the exact commit that caused a regression, a shared helper function that looks like it's part of the code being removed but isn't, or a second call site nobody thought to check.
 
 **When verification fails** (doesn't reproduce, already fixed, already exists): don't write a plan. Mark the issue `disputed` in `TRIAGE.md` with the one-line reason, and let the user decide next steps — closing or commenting on the issue is never done unilaterally.
 
