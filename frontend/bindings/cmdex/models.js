@@ -26,14 +26,6 @@ export class AppSettings {
              */
             this["locale"] = "";
         }
-        if (!("terminal" in $$source)) {
-            /**
-             * terminal ID; empty = auto-detect
-             * @member
-             * @type {string}
-             */
-            this["terminal"] = "";
-        }
         if (!("theme" in $$source)) {
             /**
              * active theme ID
@@ -539,44 +531,6 @@ export class SessionInfo {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new SessionInfo(/** @type {Partial<SessionInfo>} */($$parsedSource));
-    }
-}
-
-/**
- * TerminalInfo describes a detected terminal emulator
- */
-export class TerminalInfo {
-    /**
-     * Creates a new TerminalInfo instance.
-     * @param {Partial<TerminalInfo>} [$$source = {}] - The source object to create the TerminalInfo.
-     */
-    constructor($$source = {}) {
-        if (!("id" in $$source)) {
-            /**
-             * @member
-             * @type {string}
-             */
-            this["id"] = "";
-        }
-        if (!("name" in $$source)) {
-            /**
-             * @member
-             * @type {string}
-             */
-            this["name"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new TerminalInfo instance from a string or object.
-     * @param {any} [$$source = {}]
-     * @returns {TerminalInfo}
-     */
-    static createFrom($$source = {}) {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new TerminalInfo(/** @type {Partial<TerminalInfo>} */($$parsedSource));
     }
 }
 

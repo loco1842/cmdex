@@ -77,11 +77,6 @@ export interface VariablePrompt {
   defaultValue: string;
 }
 
-export interface TerminalInfo {
-  id: string;
-  name: string;
-}
-
 export interface SessionInfo {
   id: string;
   name: string;
@@ -122,7 +117,6 @@ export interface TabDraft {
 
 export interface SettingsPayload {
   locale?: string;
-  terminal?: string;
   theme?: string;
   lastDarkTheme?: string;
   lastLightTheme?: string;

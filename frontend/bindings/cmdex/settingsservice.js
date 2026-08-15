@@ -16,22 +16,12 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
- * GetAvailableTerminals returns all detected terminal emulators.
- * @returns {$CancellablePromise<$models.TerminalInfo[]>}
- */
-export function GetAvailableTerminals() {
-    return $Call.ByID(2374612500).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
-    }));
-}
-
-/**
  * GetSettings returns the current app settings.
  * @returns {$CancellablePromise<$models.AppSettings>}
  */
 export function GetSettings() {
     return $Call.ByID(3034808949).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType2($result);
+        return $$createType0($result);
     }));
 }
 
@@ -45,6 +35,4 @@ export function SetSettings(jsonStr) {
 }
 
 // Private type creation functions
-const $$createType0 = $models.TerminalInfo.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $models.AppSettings.createFrom;
+const $$createType0 = $models.AppSettings.createFrom;

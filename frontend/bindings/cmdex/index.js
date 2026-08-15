@@ -26,7 +26,6 @@ export {
     EventNames,
     ExecutionRecord,
     SessionInfo,
-    TerminalInfo,
     VariableDefinition,
     VariablePreset,
     VariablePrompt

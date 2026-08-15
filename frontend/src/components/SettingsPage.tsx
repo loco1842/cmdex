@@ -7,10 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Upload, Download, X, FolderOpen } from 'lucide-react';
-import { SetSettings, GetSettings, GetAvailableTerminals } from '../../bindings/cmdex/settingsservice';
+import { SetSettings, GetSettings } from '../../bindings/cmdex/settingsservice';
 import { PickDirectory, GetOS } from '../../bindings/cmdex/app';
 import { SaveThemeTemplate } from '../../bindings/cmdex/importexportservice';
-import { type TerminalInfo, THEMES, type OSKey, type CustomTheme } from '../types';
+import { THEMES, type OSKey, type CustomTheme } from '../types';
 import { getOSPath, setOSPath, normalizeOS } from '../utils/path';
 import { toast } from 'sonner';
 import { Events } from '@wailsio/runtime';
@@ -152,9 +152,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   density = 'comfortable',
 }) => {
   const { t, i18n } = useTranslation();
-  const [terminals, setTerminals] = useState<TerminalInfo[]>([]);
   const [locale, setLocale] = useState('en');
-  const [terminal, setTerminal] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customThemesStrRef = useRef('[]');
@@ -175,7 +173,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   // chain always reads the most recent state, avoiding stale-closure races when
   // the user changes multiple settings in rapid succession.
   const localeRef = useRef(locale);
-  const terminalRef = useRef(terminal);
   const draftThemeRef = useRef(draftTheme);
   const draftUiFontRef = useRef(draftUiFont);
   const draftMonoFontRef = useRef(draftMonoFont);
@@ -184,7 +181,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   // Sync refs after every render so async callbacks always read the latest.
   useEffect(() => {
     localeRef.current = locale;
-    terminalRef.current = terminal;
     draftThemeRef.current = draftTheme;
     draftUiFontRef.current = draftUiFont;
     draftMonoFontRef.current = draftMonoFont;
@@ -204,7 +200,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     GetSettings().then(current => {
       const merged = {
         locale: localeRef.current,
-        terminal: terminalRef.current,
         theme: draftThemeRef.current,
         lastDarkTheme: current?.lastDarkTheme || 'vscode-dark',
         lastLightTheme: current?.lastLightTheme || 'vscode-light',
@@ -251,11 +246,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     persistSettings({ locale: v });
   }, [persistSettings, i18n]);
 
-  const changeTerminal = useCallback((v: string) => {
-    setTerminal(v);
-    persistSettings({ terminal: v });
-  }, [persistSettings]);
-
   const changeWorkingDir = useCallback((v: string) => {
     markTouched();
     setDraftWorkingDir(v);
@@ -274,9 +264,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   }, [persistWorkingDir, draftWorkingDir]);
 
   useEffect(() => {
-    GetAvailableTerminals()
-      .then(t => setTerminals(t || []))
-      .catch(() => setTerminals([]));
     Promise.all([GetSettings(), GetOS()])
       .then(([s, os]) => {
         if (!s) return;
@@ -285,9 +272,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         const wd = getOSPath(s.defaultWorkingDir, normalizeOS(os));
         setDraftWorkingDir(wd);
         const loc = s?.locale || i18n.language || 'en';
-        const term = s?.terminal || '';
         setLocale(loc);
-        setTerminal(term);
         setSavedTheme(s.theme || 'vscode-dark');
         setDraftTheme(s.theme || 'vscode-dark');
         setSavedUiFont(s.uiFont || 'Inter');
@@ -575,23 +560,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>{t('settings.terminal')}</Label>
-            <Select value={terminal || '__auto__'} onValueChange={(v) => changeTerminal(v === '__auto__' ? '' : v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__auto__">
-                  <span className="italic opacity-70">{t('settings.terminalAuto')}</span>
-                </SelectItem>
-                {terminals.map(term => (
-                  <SelectItem key={term.id} value={term.id}>{term.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
             <Label>{t('settings.workingDirectory')}</Label>
             <div className="flex gap-2">
               <input
@@ -669,9 +637,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                           const wd = getOSPath(s.defaultWorkingDir, currentOS);
                           setDraftWorkingDir(wd);
                           setLocale(s.locale || 'en');
-                          setTerminal(s.terminal || '');
                         }).catch(() => {});
-                        GetAvailableTerminals().then(t => setTerminals(t || [])).catch(() => setTerminals([]));
                         userTouchedRef.current = false;
                         setConfirmReset(false);
                         if (fileInputRef.current) fileInputRef.current.value = '';

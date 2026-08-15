@@ -8,7 +8,6 @@ let commands: any[] = [];
 const presets: Record<string, any[]> = {};
 const settings: Record<string, any> = {
   locale: 'en',
-  terminal: '',
   theme: 'vscode-dark',
   lastDarkTheme: 'vscode-dark',
   lastLightTheme: 'vscode-light',
@@ -298,9 +297,6 @@ const handlers: Record<number, (...args: any[]) => any> = {
       /* ignore */
     }
   },
-
-  // GetAvailableTerminals
-  2374612500: () => [],
 
   // ── Execution ────────────────────────────────────────────
   // GetVariables(commandID)

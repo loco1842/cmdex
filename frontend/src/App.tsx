@@ -299,7 +299,6 @@ function App() {
     // Holds latest settings values for use in flushSettings without stale closures
     const settingsRef = useRef({
         locale: 'en',
-        terminal: '',
         theme: 'vscode-dark',
         lastDarkTheme: 'vscode-dark',
         lastLightTheme: 'vscode-light',
@@ -321,7 +320,6 @@ function App() {
         const r = settingsRef.current;
         SetSettings(JSON.stringify({
             locale: r.locale,
-            terminal: r.terminal,
             theme: r.theme,
             lastDarkTheme: r.lastDarkTheme,
             lastLightTheme: r.lastLightTheme,
@@ -564,7 +562,6 @@ function App() {
                 // Sync settingsRef before marking loaded (prevents flushSettings no-ops)
                 settingsRef.current = {
                     locale: s.locale || 'en',
-                    terminal: s.terminal || '',
                     theme: migratedTheme,
                     lastDarkTheme: migratedLastDark,
                     lastLightTheme: migratedLastLight,
@@ -597,7 +594,6 @@ function App() {
                 // Persist migrated values to DB (covers the case where migration pulled from localStorage)
                 SetSettings(JSON.stringify({
                     locale: settingsRef.current.locale,
-                    terminal: settingsRef.current.terminal,
                     theme: migratedTheme,
                     lastDarkTheme: migratedLastDark,
                     lastLightTheme: migratedLastLight,
@@ -659,12 +655,11 @@ function App() {
             // Keep settingsRef in sync BEFORE state setters fire their auto-save
             // useEffects — those effects read state and persist, so settingsRef
             // must hold the correct non-theme fields first or a stale value (e.g.
-            // lastDarkTheme, locale, terminal) could be written back to the DB.
+            // lastDarkTheme, locale) could be written back to the DB.
             const current = settingsRef.current;
             settingsRef.current = {
                 ...current,
                 locale: payload.locale ?? current.locale,
-                terminal: payload.terminal ?? current.terminal,
                 theme: payload.theme ?? current.theme,
                 lastDarkTheme: payload.lastDarkTheme ?? current.lastDarkTheme,
                 lastLightTheme: payload.lastLightTheme ?? current.lastLightTheme,

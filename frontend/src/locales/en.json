@@ -197,8 +197,6 @@
     "title": "Settings",
     "description": "Manage application preferences",
     "language": "Language",
-    "terminal": "Terminal",
-    "terminalAuto": "Auto-detect",
     "theme": "Theme",
     "save": "Save",
     "close": "Close",
