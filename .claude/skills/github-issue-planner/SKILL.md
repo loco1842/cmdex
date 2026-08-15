@@ -116,6 +116,8 @@ For each verified issue:
 
 **Slug rule:** strip any conventional-commit prefix (`feat:`, `fix:`, etc.) from the title, kebab-case what's left, drop filler words, cap around 40 characters. `"feat: ctrl+enter shortcut in spotlight search"` → `ctrl-enter-spotlight`.
 
+**Multiple issues at once:** if more than one issue was selected in Step 7, plan them in parallel — spawn one subagent per issue (Agent tool, no worktree isolation needed), each handed that issue's number, body, comments, and Step 9 verification evidence, and told to write to its own `docs/issue-plans/issue-<N>-<slug>.md`. This is safe to parallelize plainly because plan mode only *reads* the repo — there's no shared mutable state for two agents to race on, unlike `--fix` below. Merge the resulting statuses into `TRIAGE.md` yourself afterward in a single pass, rather than letting each subagent write the shared table — one writer avoids lost updates from two agents editing the same file.
+
 ### Step 11: Report
 
 Summarize what was written (triage index, plan files, any spec), flag anything marked `disputed` in Step 9, and state the next step verbatim, e.g. `github-issue-planner --fix 56`.
@@ -132,6 +134,8 @@ Full mechanics, including verification-gate and PR-body details, live in `refere
 6. **Show the diff and commit list, and get explicit confirmation before pushing.** A push to a shared, public repo is outward-facing and effectively irreversible — one confirmation is a small cost for that.
 7. **Open a draft PR** — never non-draft, never auto-merge — linking the issue (`Fixes #<N>`) and the plan file, with the task checklist and verification evidence in the body.
 8. **Close the loop**: update `TRIAGE.md` status to `pr-open` with the PR link, and stamp the PR URL back into the plan file.
+
+**Multiple issues at once:** unlike planning, running several `--fix` flows in the same working directory at once is unsafe — each one checks out its own branch and edits real source files, and a single tree can't hold two branches at once. When fixing more than one issue in parallel, give each its own isolated worktree (the Agent tool's `isolation: "worktree"` option does this automatically) and run one subagent per issue inside it, each independently working the full spine above — implement, verify, confirm, push, open its own draft PR. Never point two `--fix` subagents at the same checkout, and never skip the per-branch confirmation step just because it's running unattended in a worktree.
 
 ## Guardrails
 

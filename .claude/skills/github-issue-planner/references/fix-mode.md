@@ -130,3 +130,21 @@ Never pass anything other than `--draft`. Never call `gh pr merge`, `gh pr ready
 - Update the issue's row in `docs/issue-plans/TRIAGE.md`: status → `pr-open`, add the PR link.
 - Stamp the PR URL into the plan file's `**PR:**` header field.
 - Report the PR URL to the user and stop. Do not comment on the GitHub issue itself unless asked.
+
+## Parallelizing across multiple issues
+
+Fixing several issues at once means several branches with real source edits — those can't share one working directory. Two `--fix` flows in the same checkout would fight over which branch is checked out and could interleave writes to the same files.
+
+**Isolate each issue in its own worktree, one subagent per worktree:**
+
+- If launching via the Agent tool, pass `isolation: "worktree"` on each `--fix` subagent call — it creates and tears down the worktree automatically, and cleans it up untouched if the agent made no changes.
+- If doing it by hand:
+  ```bash
+  git worktree add ../cmdex-issue-<N> -b <prefix>/issue-<N>-<slug> origin/<default-branch>
+  ```
+  Run the full spine (steps 1–8 above) inside that worktree, then once its PR is open:
+  ```bash
+  git worktree remove ../cmdex-issue-<N>
+  ```
+
+Each subagent still runs its own confirmation-before-push (step 6) independently — parallelizing the mechanics doesn't mean skipping the human checkpoint for any individual branch. If two issues' plans touch overlapping files, don't parallelize those two — implement them sequentially so the second one is grounded in the first one's actual result rather than a plan written against a codebase that already changed underneath it.
