@@ -73,20 +73,38 @@ cd frontend && pnpm test:e2e
 
 ## 6. Commit the plan (and spec) into this branch
 
-The fix branch is cut from the default branch, so if the plan already landed there (Mode A Step 11) it's simply present — nothing to copy, skip to step 7. Otherwise it exists only as an uncommitted draft or on another branch, and won't be on the fix branch unless you copy it explicitly. Resolve the source concretely rather than treating it as a fill-in-the-blank:
+The fix branch is cut from the default branch, so if the plan already landed there (Mode A Step 11) it's simply present — nothing to copy, skip to step 7. Otherwise it exists only as an uncommitted draft or on another branch, and won't be on the fix branch unless you put it there. The two cases need different commands; run whichever applies, and in both write **straight to the final path** rather than staging through a temp file.
 
-- **Uncommitted in this session's working tree** (Mode A ran earlier in the same conversation but its plans weren't landed) — it's sitting in whatever checkout that was, e.g. the main checkout you branched or worktree'd from. Use that real path.
-- **Committed on another branch** — pull it without checking that branch out: `git show <that-branch>:docs/issue-plans/issue-<N>-<slug>.md > /tmp/plan-<N>.md`.
+**Uncommitted in another checkout** (Mode A ran earlier this session without landing its plans):
 
 ```bash
 mkdir -p docs/issue-plans
-cp <resolved-source>/issue-<N>-<slug>.md docs/issue-plans/
-cp <resolved-source>/issue-<N>-<slug>.spec.md docs/issue-plans/ 2>/dev/null   # only if one exists
-git add docs/issue-plans/issue-<N>-<slug>.md docs/issue-plans/issue-<N>-<slug>.spec.md 2>/dev/null
+SRC=<that-checkout>/docs/issue-plans
+cp "$SRC/issue-<N>-<slug>.md" docs/issue-plans/
+[ -f "$SRC/issue-<N>-<slug>.spec.md" ] && cp "$SRC/issue-<N>-<slug>.spec.md" docs/issue-plans/
+```
+
+**Committed on another branch** — read it out without checking that branch out:
+
+```bash
+mkdir -p docs/issue-plans
+git show <branch>:docs/issue-plans/issue-<N>-<slug>.md > docs/issue-plans/issue-<N>-<slug>.md
+git show <branch>:docs/issue-plans/issue-<N>-<slug>.spec.md > docs/issue-plans/issue-<N>-<slug>.spec.md 2>/dev/null || rm -f docs/issue-plans/issue-<N>-<slug>.spec.md
+```
+
+Three things that bite here. Redirecting to a temp file and copying afterward is how the filename drifts away from the one the PR link expects — write the destination name directly. The `|| rm -f` isn't decoration: a failed `git show` still creates its redirect target, so without it every non-escalated issue picks up an empty `.spec.md`. And keep that `||` on one line rather than wrapping it with a `\` continuation — the continuation is easy to mangle when these commands get passed around as a single string, and a broken `||` silently deletes the file the `git show` just wrote.
+
+Then commit, staging the spec only when there is one:
+
+```bash
+git add docs/issue-plans/issue-<N>-<slug>.md
+[ -f docs/issue-plans/issue-<N>-<slug>.spec.md ] && git add docs/issue-plans/issue-<N>-<slug>.spec.md
 git commit -m "docs: add plan for issue #<N>"
 ```
 
-Copy the spec too whenever one exists, not just the plan — an escalated issue's PR should carry its whole decision record, not half of it. Do this as its own small commit, separate from the task commits. Skipping this step means the PR body's "Plan" link (step 9) points at a file that doesn't exist on this branch.
+Stage the two paths as separate commands, not one `git add plan spec`. When the spec doesn't exist — the common case, since only escalated issues have one — a combined add fails on the missing pathspec with exit 128 and stages **nothing at all, including the plan**. Suppressing its stderr hides that completely, and the commit that follows then either fails or ships without the plan.
+
+Carry the spec whenever one exists — an escalated issue's PR should have its whole decision record, not half of it. Keep this as its own small commit, separate from the task commits. Skipping this step means the PR body's "Plan" link (step 9) points at a file that isn't on the branch.
 
 ## 7. Verify independently before asking for confirmation
 
