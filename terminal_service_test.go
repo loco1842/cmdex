@@ -13,9 +13,6 @@ import (
 
 func newTestTerminalService(t *testing.T) *TerminalService {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping: Windows ptyBackend is currently a stub (real ConPTY backend pending — see tasks/plan.md Phase 3)")
-	}
 	s := &TerminalService{ptyBackend: newPtyBackend()}
 	s.sessions = make(map[string]*sessionState)
 	return s
@@ -157,6 +154,10 @@ func TestTerminalShutdown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: calls ptyStart directly with Unix shell syntax (\"-c\", \"sleep 60\") — " +
+			"not a stub limitation, this test is inherently Unix-specific")
+	}
 
 	shellPath, shellFlag := detectShell()
 
@@ -246,6 +247,10 @@ func TestPtyStart_RejectsInvalidDimensions(t *testing.T) {
 func TestTerminalExit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping: calls ptyStart directly with Unix shell syntax (\"-c\", \"exit 0\") — " +
+			"not a stub limitation, this test is inherently Unix-specific")
 	}
 
 	s := newTestTerminalService(t)
