@@ -129,7 +129,11 @@ For each verified issue:
 
 **Slug rule:** strip any conventional-commit prefix (`feat:`, `fix:`, etc.) from the title, kebab-case what's left, drop filler words, cap around 40 characters. `"feat: ctrl+enter shortcut in spotlight search"` → `ctrl-enter-spotlight`.
 
-**Multiple issues at once:** if more than one issue was selected in Step 7, plan them in parallel — spawn one subagent per issue (Agent tool, no worktree isolation needed), each handed that issue's number, body, comments, and Step 9 verification evidence, and told to write to its own `docs/issue-plans/issue-<N>-<slug>.md`. This is safe to parallelize plainly because plan mode only *reads* the repo — there's no shared mutable state for two agents to race on, unlike `--fix` below. Merge the resulting statuses into `TRIAGE.md` yourself afterward in a single pass, rather than letting each subagent write the shared table — one writer avoids lost updates from two agents editing the same file.
+**Use the `issue-planner` agent for this.** It's defined at `.claude/agents/issue-planner.md` and already encodes everything above — premise verification, the escalation check, real-code grounding, the plan template, and the boundaries (markdown only, never writes `TRIAGE.md`). Spawn it with `agentType: "issue-planner"` rather than briefing a generic agent from scratch. It defaults to Opus 5, since plan quality is what everything downstream is built on. If the agent isn't available for some reason, fall back to a general-purpose agent briefed with this section plus `references/plan-template.md`.
+
+**Multiple issues at once:** if more than one issue was selected in Step 7, plan them in parallel — one `issue-planner` per issue (no worktree isolation needed), each handed that issue's number, body, comments, and triage metadata. Fresh agents see none of this conversation, so put everything they need in the prompt. This parallelizes safely because plan mode only *reads* the repo — there's no shared mutable state to race on, unlike `--fix` below. Merge the returned verdicts into `TRIAGE.md` yourself afterward in a single pass; letting each agent write that shared table would lose updates.
+
+Each agent reports a verdict of `planned`, `disputed`, `needs-spec`, or `inconclusive` — handle the last three per Steps 8 and 9 rather than treating a missing plan file as a failure.
 
 ### Step 11: Land the plans on the default branch
 
@@ -205,3 +209,4 @@ These aren't arbitrary restrictions — each protects something that would be ex
 - `references/plan-template.md` — the exact plan file structure to fill in
 - `references/fix-mode.md` — branch naming, verification commands, PR body template
 - `references/review-mode.md` — feedback-fetching commands, categorization, response-plan format, comment-reply mechanics
+- `.claude/agents/issue-planner.md` — the per-issue planning agent Step 10 spawns (Opus 5 by default)
