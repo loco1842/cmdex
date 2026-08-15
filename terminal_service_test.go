@@ -289,7 +289,7 @@ func TestTerminalExit(t *testing.T) {
 	_, _ = execProc.Wait()
 	ptmx.Close()
 
-	go s.monitorExit(ss, execProc, ptmx, ss.stopCh)
+	go s.monitorExit(ss, execProc, ss.stopCh)
 	defer s.Stop(id)
 
 	if !execProc.Exited() {

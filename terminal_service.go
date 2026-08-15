@@ -314,13 +314,7 @@ func (s *TerminalService) CloseSession(id string) error {
 	s.mu.Unlock()
 
 	// Kill PTY and wait for goroutines (no locks held — prevents deadlock).
-	if oldPtmx != nil {
-		_ = oldPtmx.Close()
-	}
-	if oldProc != nil && !oldProc.Exited() {
-		_ = s.ptyBackend.Kill(oldProc)
-	}
-	ss.readerWg.Wait()
+	s.releaseOldProcess(ss, oldPtmx, oldProc)
 	ss.stopEmitter()
 
 	return nil
@@ -408,13 +402,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	// CRITICAL: unlock before blocking operations to prevent deadlock.
 	ss.mu.Unlock()
 
-	if oldPtmx != nil {
-		_ = oldPtmx.Close()
-	}
-	if oldProc != nil && !oldProc.Exited() {
-		_ = s.ptyBackend.Kill(oldProc)
-	}
-	ss.readerWg.Wait()
+	s.releaseOldProcess(ss, oldPtmx, oldProc)
 
 	handle, proc, err := s.ptyBackend.Start(shellPath, shellFlag, ss.workingDir, rows, cols)
 
@@ -436,7 +424,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	stopCh := ss.stopCh
 	ss.readerWg.Add(1)
 	go ss.readLoop(handle, stopCh)
-	go s.monitorExit(ss, proc, handle, stopCh)
+	go s.monitorExit(ss, proc, stopCh)
 
 	return nil
 }
@@ -448,6 +436,21 @@ func (ss *sessionState) stopSessionLocked() {
 		close(ss.stopCh)
 		ss.stopCh = nil
 	}
+}
+
+// releaseOldProcess closes oldPtmx, kills oldProc if it hasn't already exited,
+// and waits for ss's reader goroutine to finish. Shared by CloseSession, Stop,
+// and startSessionLocked, which all snapshot ss.ptmx/ss.proc under ss.mu, clear
+// them, and then must run this sequence with ss.mu NOT held — Close/Kill can
+// block, and readLoop needs to run unimpeded to observe stopCh and exit.
+func (s *TerminalService) releaseOldProcess(ss *sessionState, oldPtmx ptyHandle, oldProc ptyProcess) {
+	if oldPtmx != nil {
+		_ = oldPtmx.Close()
+	}
+	if oldProc != nil && !oldProc.Exited() {
+		_ = s.ptyBackend.Kill(oldProc)
+	}
+	ss.readerWg.Wait()
 }
 
 // readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to enqueueOutput.
@@ -573,7 +576,7 @@ func (ss *sessionState) enqueueOutput(data string) {
 }
 
 // monitorExit watches for shell exit and handles event emission and auto-restart.
-func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, ptmx ptyHandle, stopCh chan struct{}) {
+func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh chan struct{}) {
 	exitCode, _ := proc.Wait()
 
 	select {
@@ -746,13 +749,7 @@ func (s *TerminalService) Stop(sessionId string) error {
 	ss.running = false
 	ss.mu.Unlock()
 
-	if oldPtmx != nil {
-		_ = oldPtmx.Close()
-	}
-	if oldProc != nil && !oldProc.Exited() {
-		_ = s.ptyBackend.Kill(oldProc)
-	}
-	ss.readerWg.Wait()
+	s.releaseOldProcess(ss, oldPtmx, oldProc)
 
 	return nil
 }
