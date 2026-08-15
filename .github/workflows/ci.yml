@@ -250,7 +250,13 @@ jobs:
         shell: bash
         run: mkdir -p frontend/dist && touch frontend/dist/.gitkeep
 
+      - name: Add MinGW gcc to PATH (cgo, required by -race)
+        shell: pwsh
+        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Go test
+        env:
+          CGO_ENABLED: "1"
         run: go test -race ./...
 
   build-check:
