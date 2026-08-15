@@ -78,7 +78,7 @@ type sessionState struct {
 
 	mu              sync.Mutex
 	ptmx            ptyHandle
-	cmd             *exec.Cmd
+	proc            ptyProcess
 	shellPath       string
 	shellFlag       string
 	lastSize        ptyWinsize
@@ -104,8 +104,13 @@ type TerminalService struct {
 	ptyBackend      ptyBackend
 }
 
-// info returns the public SessionInfo for this session.
+// info returns the public SessionInfo for this session. Locks ss.mu: Running
+// and ShellPath are written under ss.mu by startSessionLocked, and all three
+// callers (CreateSession, ListSessions, GetActiveSession) hold only s.mu
+// (the service-level lock) when calling this, never ss.mu.
 func (ss *sessionState) info() *SessionInfo {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 	return &SessionInfo{
 		ID:         ss.id,
 		Name:       ss.name,
@@ -300,9 +305,9 @@ func (s *TerminalService) CloseSession(id string) error {
 	ss.mu.Lock()
 	ss.stopSessionLocked()
 	oldPtmx := ss.ptmx
-	oldCmd := ss.cmd
+	oldProc := ss.proc
 	ss.ptmx = nil
-	ss.cmd = nil
+	ss.proc = nil
 	ss.running = false
 	ss.closed = true
 	ss.mu.Unlock()
@@ -312,8 +317,8 @@ func (s *TerminalService) CloseSession(id string) error {
 	if oldPtmx != nil {
 		_ = oldPtmx.Close()
 	}
-	if oldCmd != nil && oldCmd.ProcessState == nil {
-		_ = s.ptyBackend.Kill(oldCmd)
+	if oldProc != nil && !oldProc.Exited() {
+		_ = s.ptyBackend.Kill(oldProc)
 	}
 	ss.readerWg.Wait()
 	ss.stopEmitter()
@@ -392,9 +397,9 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.stopSessionLocked()
 
 	oldPtmx := ss.ptmx
-	oldCmd := ss.cmd
+	oldProc := ss.proc
 	ss.ptmx = nil
-	ss.cmd = nil
+	ss.proc = nil
 	ss.running = false
 	ss.intentionalStop = false
 
@@ -406,12 +411,12 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	if oldPtmx != nil {
 		_ = oldPtmx.Close()
 	}
-	if oldCmd != nil && oldCmd.ProcessState == nil {
-		_ = s.ptyBackend.Kill(oldCmd)
+	if oldProc != nil && !oldProc.Exited() {
+		_ = s.ptyBackend.Kill(oldProc)
 	}
 	ss.readerWg.Wait()
 
-	handle, cmd, err := s.ptyBackend.Start(shellPath, shellFlag, ss.workingDir, rows, cols)
+	handle, proc, err := s.ptyBackend.Start(shellPath, shellFlag, ss.workingDir, rows, cols)
 
 	ss.mu.Lock()
 	ss.starting = false
@@ -424,14 +429,14 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.shellFlag = shellFlag
 	ss.lastSize = ptyWinsize{Rows: uint16(rows), Cols: uint16(cols)}
 	ss.ptmx = handle
-	ss.cmd = cmd
+	ss.proc = proc
 	ss.stopCh = make(chan struct{})
 	ss.running = true
 
 	stopCh := ss.stopCh
 	ss.readerWg.Add(1)
 	go ss.readLoop(handle, stopCh)
-	go s.monitorExit(ss, cmd, handle, stopCh)
+	go s.monitorExit(ss, proc, handle, stopCh)
 
 	return nil
 }
@@ -568,23 +573,13 @@ func (ss *sessionState) enqueueOutput(data string) {
 }
 
 // monitorExit watches for shell exit and handles event emission and auto-restart.
-func (s *TerminalService) monitorExit(ss *sessionState, cmd *exec.Cmd, ptmx ptyHandle, stopCh chan struct{}) {
-	err := cmd.Wait()
+func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, ptmx ptyHandle, stopCh chan struct{}) {
+	exitCode, _ := proc.Wait()
 
 	select {
 	case <-stopCh:
 		return
 	default:
-	}
-
-	exitCode := 0
-	if err != nil {
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
-		}
 	}
 
 	ss.mu.Lock()
@@ -745,17 +740,17 @@ func (s *TerminalService) Stop(sessionId string) error {
 	ss.stopSessionLocked()
 
 	oldPtmx := ss.ptmx
-	oldCmd := ss.cmd
+	oldProc := ss.proc
 	ss.ptmx = nil
-	ss.cmd = nil
+	ss.proc = nil
 	ss.running = false
 	ss.mu.Unlock()
 
 	if oldPtmx != nil {
 		_ = oldPtmx.Close()
 	}
-	if oldCmd != nil && oldCmd.ProcessState == nil {
-		_ = s.ptyBackend.Kill(oldCmd)
+	if oldProc != nil && !oldProc.Exited() {
+		_ = s.ptyBackend.Kill(oldProc)
 	}
 	ss.readerWg.Wait()
 

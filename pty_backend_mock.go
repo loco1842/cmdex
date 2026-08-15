@@ -22,10 +22,11 @@ import (
 type mockPtyBackend struct{}
 
 // Start returns a mockPtyHandle pre-sized to rows/cols and a real *exec.Cmd
-// running "sleep 0.05" so that monitorExit's cmd.Wait() returns promptly
+// (wrapped as an execProcess, the same ptyProcess adapter the unix backend
+// uses) running "sleep 0.05" so that monitorExit's Wait() returns promptly
 // (the test does not need a long-lived shell to validate the orchestration
 // path).
-func (mockPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+func (mockPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
 	cmd := exec.CommandContext(context.Background(), "sleep", "0.05")
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
@@ -35,7 +36,7 @@ func (mockPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (p
 		input:  &bytes.Buffer{},
 		cols:   cols,
 		rows:   rows,
-	}, cmd, nil
+	}, newExecProcess(cmd), nil
 }
 
 // Resize updates the recorded cols/rows on a mockPtyHandle.
@@ -52,11 +53,12 @@ func (mockPtyBackend) Resize(handle ptyHandle, cols, rows int) error {
 }
 
 // Kill terminates the sleep process spawned by Start, if any.
-func (mockPtyBackend) Kill(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
+func (mockPtyBackend) Kill(proc ptyProcess) error {
+	ep, ok := proc.(*execProcess)
+	if !ok || ep == nil || ep.cmd.Process == nil {
 		return nil
 	}
-	return cmd.Process.Kill()
+	return ep.cmd.Process.Kill()
 }
 
 // mockPtyHandle is an in-memory ptyHandle. Read drains the output buffer (or

@@ -105,10 +105,10 @@ func TestTerminalStart(t *testing.T) {
 	if ss.ptmx == nil {
 		t.Fatal("ptmx is nil after Start")
 	}
-	if ss.cmd == nil {
-		t.Fatal("cmd is nil after Start")
+	if ss.proc == nil {
+		t.Fatal("proc is nil after Start")
 	}
-	if ss.cmd.Process == nil {
+	if ss.proc.Pid() == 0 {
 		t.Fatal("process is nil after Start")
 	}
 }
@@ -180,15 +180,17 @@ func TestTerminalShutdown(t *testing.T) {
 		t.Errorf("cmd.Dir = %q, want %q", c.Dir, wantDir)
 	}
 
+	execProc := newExecProcess(c)
+
 	ss.mu.Lock()
 	ss.ptmx = ptmx
-	ss.cmd = c
+	ss.proc = execProc
 	ss.stopCh = make(chan struct{})
 	ss.running = true
-	pid := ss.cmd.Process.Pid
+	pid := execProc.Pid()
 	ss.mu.Unlock()
 
-	proc, err := os.FindProcess(pid)
+	osProc, err := os.FindProcess(pid)
 	if err != nil {
 		t.Fatalf("FindProcess failed: %v", err)
 	}
@@ -200,11 +202,11 @@ func TestTerminalShutdown(t *testing.T) {
 	if ss.ptmx != nil {
 		t.Error("ptmx not cleared after Stop")
 	}
-	if ss.cmd != nil {
-		t.Error("cmd not cleared after Stop")
+	if ss.proc != nil {
+		t.Error("proc not cleared after Stop")
 	}
 
-	err = proc.Signal(syscall.Signal(0))
+	err = osProc.Signal(syscall.Signal(0))
 	if err == nil {
 		t.Error("process still running after Stop")
 	}
@@ -263,23 +265,29 @@ func TestTerminalExit(t *testing.T) {
 		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, wantDir)
 	}
 
+	execProc := newExecProcess(cmd)
+
 	ss.mu.Lock()
 	ss.shellPath = shellPath
 	ss.shellFlag = shellFlag
 	ss.lastSize = ptyWinsize{Rows: 24, Cols: 80}
 	ss.ptmx = ptmx
-	ss.cmd = cmd
+	ss.proc = execProc
 	ss.stopCh = make(chan struct{})
 	ss.running = true
 	ss.mu.Unlock()
 
-	_ = cmd.Wait()
+	// Wait via the same execProcess wrapper monitorExit uses below — this
+	// exercises the sync.Once-guarded Wait (see execProcess in pty_backend.go)
+	// that lets both callers observe the same single physical cmd.Wait() call
+	// instead of racing two separate calls on the same *exec.Cmd.
+	_, _ = execProc.Wait()
 	ptmx.Close()
 
-	go s.monitorExit(ss, cmd, ptmx, ss.stopCh)
+	go s.monitorExit(ss, execProc, ptmx, ss.stopCh)
 	defer s.Stop(id)
 
-	if cmd.ProcessState == nil {
+	if !execProc.Exited() {
 		t.Error("process state is nil after shell exit")
 	}
 }

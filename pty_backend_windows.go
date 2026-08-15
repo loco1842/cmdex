@@ -24,7 +24,7 @@ func newPtyBackend() ptyBackend {
 type conptyBackend struct{}
 
 // Start returns an error — Windows conpty is not yet implemented.
-func (conptyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, *exec.Cmd, error) {
+func (conptyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
 	return nil, nil, fmt.Errorf("Windows PTY support not yet implemented — see Plan 16-03")
 }
 
@@ -34,8 +34,11 @@ func (conptyBackend) Resize(handle ptyHandle, cols, rows int) error {
 }
 
 // Kill terminates the process group using taskkill.
-func (conptyBackend) Kill(cmd *exec.Cmd) error {
-	return killProcessGroup(cmd)
+func (conptyBackend) Kill(proc ptyProcess) error {
+	if proc == nil {
+		return nil
+	}
+	return killProcessGroup(proc.Pid())
 }
 
 // ptyStart is the windows-side stub preserved as a package-level function so
@@ -48,9 +51,9 @@ func ptyResize(ptmx *os.File, cols, rows int) error {
 	return fmt.Errorf("Windows PTY support not yet implemented")
 }
 
-func killProcessGroup(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
+func killProcessGroup(pid int) error {
+	if pid == 0 {
 		return nil
 	}
-	return exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+	return exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
 }
