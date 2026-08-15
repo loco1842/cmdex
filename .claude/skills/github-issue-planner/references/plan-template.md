@@ -17,6 +17,23 @@ What the reporter actually needs, restated in your own words — not just a copy
 of the issue title. Include reproduction steps for bugs, or the concrete gap
 being asked for on feature requests.
 
+## Verification
+
+Evidence that this issue is still real *before* any code was planned against
+it — not a restatement of the Problem section. Cite what you checked:
+
+- **Reproduced/confirmed by:** <e.g. "read `Spotlight.tsx:40-58`, no keydown
+  handler for Enter while a modifier is held" or "ran the repro steps, still
+  fails on current `main`">
+- **Checked for a prior fix:** `git log --oneline -- <path>` since
+  <issue's createdAt> — <found nothing relevant / found X, doesn't cover this>
+- **Checked it doesn't already exist (feature requests only):** <where you
+  searched and what you found>
+
+If this section can't be filled in with real evidence, stop — don't write the
+rest of the plan. Flag the issue as `disputed` in TRIAGE.md instead (see
+`references/triage-rubric.md`, "Premise verification").
+
 ## Current behavior
 
 Where this lives in the code today, with real citations: `path/to/file.tsx:123`.

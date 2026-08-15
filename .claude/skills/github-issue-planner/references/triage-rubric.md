@@ -52,3 +52,20 @@ Escalate to the spec-driven-development skill (see SKILL.md Step 8) before writi
 - Reverting the change later would be expensive (data migrations, public API shape, anything users would build workflows on top of)
 
 When none of these hold, plan directly — most issues (a UI tweak, a missing shortcut, a small bug with a clear repro) don't need the extra ceremony of a spec round-trip.
+
+## Premise verification
+
+Before writing a plan (SKILL.md Step 9), confirm the issue is still an accurate description of reality. What counts as sufficient evidence depends on category:
+
+| Category | What "verified" looks like |
+|---|---|
+| **bug** | You read the exact code path the report implies and it plainly still produces the described behavior, *or* you reproduced it (ran the command, hit the UI flow). Check `git log --oneline -- <path>` for commits touching that area since the issue's `createdAt` — a later change may have already fixed it. |
+| **enhancement / idea** | You searched the codebase for the requested capability under any name and confirmed it genuinely doesn't exist yet. A feature request for something already shipped is stale, not a gap. |
+| **documentation** | You checked the current docs (`docs/`, `README.md`, inline comments) and confirmed the described gap or inaccuracy is still there. |
+| **question / duplicate / invalid** | These rarely warrant a plan at all — confirm which one it actually is (answer it, point at the duplicate, or explain why it's invalid) rather than planning around an unclear ask. |
+
+Evidence goes in the plan's Verification section as a citation (`file.ext:line`, a commit hash, or a described repro) — not as "confirmed" with nothing backing it up.
+
+**When verification fails** (doesn't reproduce, already fixed, already exists): don't write a plan. Mark the issue `disputed` in `TRIAGE.md` with the one-line reason, and let the user decide next steps — closing or commenting on the issue is never done unilaterally.
+
+**When verification is inconclusive** (platform-specific, needs the reporter's environment, insufficient information): say so plainly and ask the user whether to proceed speculatively or wait for more detail. Guessing and writing a confident-looking plan anyway is the failure mode this step exists to prevent.

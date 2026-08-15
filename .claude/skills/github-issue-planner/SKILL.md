@@ -78,7 +78,7 @@ _Last updated: <date> · repo: <owner>/<repo> · <N> open issues_
 | [56](https://github.com/<owner>/<repo>/issues/56) | ctrl+enter in spotlight | enhancement | P2 | S | [plan](issue-56-ctrl-enter-spotlight.md) | planned |
 ```
 
-Status progresses: `triaged` → `planned` → `in-progress` → `pr-open` → `merged` / `wontfix`.
+Status progresses: `triaged` → `planned` → `in-progress` → `pr-open` → `merged` / `wontfix`. An issue that fails premise verification (Step 9) gets `disputed` instead of `planned`, with the reason noted in the table.
 
 ### Step 7: Present and select
 
@@ -90,21 +90,35 @@ Before writing a plan, check the escalation test in `references/triage-rubric.md
 
 When escalating, direct that skill's output to `docs/issue-plans/issue-<N>-<slug>.spec.md` — **not** a root `SPEC.md`. If the project already has a root spec file, it almost certainly documents something else, and overwriting it would destroy unrelated context. Link the spec from the plan header once it's approved, and don't proceed to Step 9 until the user has signed off on it.
 
-### Step 9: Write the plan
+### Step 9: Verify the issue is still real
 
-For each selected issue:
+A reporter can be wrong, and an issue can go stale between filing and today — already fixed by a later commit, describing behavior that's actually correct, or asking for something that already exists. Planning against a false premise is worse than not planning at all: the whole downstream chain (plan → `--fix` → PR) inherits the mistake, and it looks credible right up until someone tries to use it. Verify **before** writing code into a plan, not after — see `references/triage-rubric.md`'s "Premise verification" section for what counts as sufficient evidence per category:
+
+- **Bugs:** read the exact code path the issue implies and confirm it still produces the described behavior. Check whether a later commit already touched those files (`git log --oneline -- <path>` since the issue's `createdAt`) — it may already be fixed. If you can reproduce it (or the code plainly shows the bug), that's your evidence; cite it.
+- **Enhancements/features:** search the codebase to confirm the capability doesn't already exist under a different name or place. If it does, the issue is stale, not a gap.
+- **Anything else (question, possible duplicate, vague ask):** don't force it through — note what's unclear.
+
+**If verification fails** — doesn't reproduce, already fixed, feature already exists — stop before writing a plan. Set that issue's `TRIAGE.md` status to `disputed`, note the one-line reason and evidence (e.g. "fixed in a1b2c3d", "already implemented in `Sidebar.tsx:88`"), and tell the user directly rather than silently skipping it. Never close, comment on, or label the issue yourself over this — only suggest it; that's the user's call (see Guardrails).
+
+**If verification is inconclusive** — platform-specific, needs data you don't have access to, or genuinely requires the reporter's environment — say so plainly instead of guessing, and ask the user whether to plan speculatively anyway or hold until more information comes in.
+
+Only issues that clear this step move on to Step 10.
+
+### Step 10: Write the plan
+
+For each verified issue:
 
 1. **Ground it in real code first.** Read the actual files the change would touch. Every code snippet and file reference in the plan needs to match what's really on disk (cite as `path/file.ext:line`) — a plan built on invented function names or guessed file paths is actively worse than no plan, because it looks trustworthy and isn't.
 2. **Borrow the planning-and-task-breakdown skill's decomposition discipline** — vertical slices over horizontal layers, per-task acceptance criteria and verification steps, dependencies made explicit, checkpoints every 2–3 tasks, nothing sized past ~5 files.
 3. **Redirect its output.** That skill defaults to writing `tasks/plan.md` and `tasks/todo.md`. Those paths may already hold unrelated in-flight work in this project, so when invoking it, say explicitly that the plan for this issue goes to `docs/issue-plans/issue-<N>-<slug>.md` instead, and that the default `tasks/` targets are off-limits for this run.
-4. Fill out `references/plan-template.md`.
+4. Fill out `references/plan-template.md`, including its Verification section — the evidence from Step 9, not just a restatement of the issue.
 5. Update the issue's row in `TRIAGE.md` to `planned`, linking the new plan file.
 
 **Slug rule:** strip any conventional-commit prefix (`feat:`, `fix:`, etc.) from the title, kebab-case what's left, drop filler words, cap around 40 characters. `"feat: ctrl+enter shortcut in spotlight search"` → `ctrl-enter-spotlight`.
 
-### Step 10: Report
+### Step 11: Report
 
-Summarize what was written (triage index, plan files, any spec), and state the next step verbatim, e.g. `github-issue-planner --fix 56`.
+Summarize what was written (triage index, plan files, any spec), flag anything marked `disputed` in Step 9, and state the next step verbatim, e.g. `github-issue-planner --fix 56`.
 
 ## Mode B — `--fix`
 
@@ -129,9 +143,10 @@ These aren't arbitrary restrictions — each protects something that would be ex
 - **Never push to the default branch, never merge, never mark a PR ready-for-review** — `--fix` produces a draft PR and stops.
 - **Never close, label, assign, or comment on an issue without asking first** — those actions are visible to other people on the repo and can't be quietly undone.
 - **Never edit source code outside `--fix` mode.** Plan mode reads and writes markdown only.
+- **Never write a plan for an issue whose premise wasn't verified against the current codebase** (Step 9) — flag it as `disputed` instead. A plan is only as trustworthy as the problem statement it's built on.
 
 ## See also
 
-- `references/triage-rubric.md` — category mapping, priority/effort scales, escalation test
+- `references/triage-rubric.md` — category mapping, priority/effort scales, escalation test, premise verification
 - `references/plan-template.md` — the exact plan file structure to fill in
 - `references/fix-mode.md` — branch naming, verification commands, PR body template
