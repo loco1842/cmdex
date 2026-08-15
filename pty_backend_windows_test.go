@@ -29,6 +29,7 @@ package main
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -192,4 +193,103 @@ func TestConptyStart_RejectsInvalidDimensions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConptyProcess_ConcurrentWaitReturnsSameResult exercises the exact
+// property conptyProcess.Wait's sync.Once guard exists for — the same
+// invariant TestExecProcess_ConcurrentWaitReturnsSameResult
+// (pty_backend_unix_test.go) proves for the unix execProcess type. Unlike
+// execProcess (waited on concurrently by monitorExit and
+// killProcessGroup's SIGKILL-escalation goroutine in production),
+// conptyProcess.Wait is never called concurrently anywhere in production —
+// conptyBackend.Kill deliberately never reaps (contract 7/8, tasks/plan.md)
+// — so nothing else in this suite exercises the guard under real
+// concurrency. Uses cmd.exe directly (via the spike test's cmdExePath
+// helper, same package) rather than detectShell's result so the exit code
+// is deterministic regardless of whether pwsh/powershell is on CI's PATH.
+func TestConptyProcess_ConcurrentWaitReturnsSameResult(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	handle, proc, err := conptyStart(cmdExePath(t), "", "", 24, 80, "/C", "exit 7")
+	if err != nil {
+		t.Fatalf("conptyStart failed: %v", err)
+	}
+	defer func() { _ = handle.Close() }()
+
+	const goroutines = 10
+	codes := make([]int, goroutines)
+	errs := make([]error, goroutines)
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := range codes {
+		go func(i int) {
+			defer wg.Done()
+			codes[i], errs[i] = proc.Wait()
+		}(i)
+	}
+	wg.Wait()
+
+	if !proc.Exited() {
+		t.Error("Exited() = false after Wait() completed")
+	}
+
+	for i := 1; i < goroutines; i++ {
+		if codes[i] != codes[0] {
+			t.Errorf("goroutine %d observed exit code %d, want %d (same as goroutine 0)", i, codes[i], codes[0])
+		}
+		if errs[i] != errs[0] {
+			t.Errorf("goroutine %d observed err %v, want %v (same as goroutine 0)", i, errs[i], errs[0])
+		}
+	}
+	if codes[0] != 7 {
+		t.Errorf("exit code = %d, want 7", codes[0])
+	}
+}
+
+// TestConptyHandle_CloseUnblocksRead verifies the production conptyHandle's
+// Close() unblocks a pending Read() (contract 5, tasks/plan.md). The Phase-2
+// spike (TestConptySpike_CloseUnblocksRead,
+// pty_backend_windows_conpty_spike_test.go) only proved this for the raw
+// conpty library — conptyHandle adds its own pump-goroutine/done-channel
+// layer specifically because Close-unblocks-Read isn't trusted to hold in
+// general on Win32 (see the comment on conptyHandle in
+// pty_backend_windows.go), so this exercises the actual shipped wrapper
+// rather than just the library underneath it.
+func TestConptyHandle_CloseUnblocksRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	shellPath, shellFlag := detectShell()
+	handle, proc, err := conptyStart(shellPath, shellFlag, "", 24, 80)
+	if err != nil {
+		t.Fatalf("conptyStart failed: %v", err)
+	}
+
+	readReturned := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		_, readErr := handle.Read(buf)
+		readReturned <- readErr
+	}()
+
+	if err := handle.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	select {
+	case readErr := <-readReturned:
+		if readErr == nil {
+			t.Error("Read returned nil error after Close; want a non-nil error (os.ErrClosed or io.EOF)")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not return within 2s of Close() — conptyHandle.Close did not unblock a pending Read")
+	}
+
+	// Close already calls proc.terminate(); reap here so the process handle
+	// is closed rather than leaked for the remainder of the test run.
+	_, _ = proc.Wait()
 }
