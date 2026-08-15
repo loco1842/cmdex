@@ -192,7 +192,7 @@ jobs:
         run: mkdir -p frontend/dist && touch frontend/dist/.gitkeep
 
       - name: Go test
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Cache Go bin
         id: cache-gobin
@@ -251,7 +251,7 @@ jobs:
         run: mkdir -p frontend/dist && touch frontend/dist/.gitkeep
 
       - name: Go test
-        run: go test ./...
+        run: go test -race ./...
 
   build-check:
     name: Build check (${{ matrix.os }})
