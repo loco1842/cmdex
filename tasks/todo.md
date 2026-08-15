@@ -68,7 +68,7 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
 
 ## Phase 3 — Full Windows implementation
 
-- [ ] **3.1** Implement real `conptyBackend` + `conptyProcess` in `pty_backend_windows.go`
+- [x] **3.1** Implement real `conptyBackend` + `conptyProcess` in `pty_backend_windows.go`
   - **Fix the bare-`"cmd"` landmine first**: `charmbracelet/x/conpty`'s internal `lookExtensions` resolves a bare program name relative to the working directory. `detectShell()` returns the bare string `"cmd"` when neither `pwsh` nor `powershell` is found. With any non-empty `dir`, `Spawn` would fail resolution, silently trigger the dir-fallback retry, and every `cmd.exe` session would lose its configured working directory. Fix: `exec.LookPath(shellPath)` to an absolute path *before* calling `Spawn`.
   - `Start`: build argv (`[shellPath, shellFlag if non-empty] + extraArgs`, skip empty flag — `Spawn` takes argv natively, no quoting needed); move `resolvePtyWorkingDir` to `pty_backend.go` (it's pure `os.Stat`/`os.UserHomeDir`, already platform-neutral) and reuse it + the retry-with-empty-dir pattern; env via `buildPtyEnv(os.Environ())`; `conpty.New(cols, rows, 0)` — **note `New`/`Resize` take `(width, height)` == `(cols, rows)`, an extra place the rows/cols transpose can bite** distinct from the `Start`/`Resize` arg-order inversion already tracked.
   - `Resize`: real `cp.Resize(cols, rows)` via `ResizePseudoConsole`; type-assert the handle, fast path, must not call back into `TerminalService`.
@@ -79,14 +79,21 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
   - Preserve package-level `ptyStart`/`ptyResize`/`killProcessGroup` functions for existing test-code compatibility (per `pty_backend_windows.go:41`'s existing comment).
   - Acceptance: Windows CI runs the real backend; `GOOS=windows go build ./...` + `make lint` clean.
   - Verify: Windows CI.
-  - **Fix in passing** (pre-existing, found by review, not introduced here): `terminal_service_test.go:41` asserts `detectShell()` returns a bare string (`"pwsh"`/`"powershell"`/`"cmd"`), but the function actually returns `exec.LookPath`'s absolute path for pwsh/powershell — this assertion is wrong today and will fail as soon as Windows CI runs it. Fix alongside 0.2/3.2.
-- [ ] **3.2** Windows-tagged test suite + un-skip stub-blocked tests
+  - **Fix in passing** (pre-existing, found by review, not introduced here): `terminal_service_test.go:41` asserts `detectShell()` returns a bare string (`"pwsh"`/`"powershell"`/`"cmd"`), but the function actually returns `exec.LookPath`'s absolute path for pwsh/powershell — this assertion is wrong today and will fail as soon as Windows CI runs it. **Already fixed back in Phase 0.2**, no additional work needed here.
+  - **Done**, implemented exactly as scoped above: the bare-`"cmd"` fix, `conptyHandle`'s pump-goroutine `Read` design, bounded `Close`, `sync.Once`-guarded `Wait` in `conptyProcess` (handle closed only in `finish()`, after the wait completes — the precise defect that ruled out `UserExistsError/conpty`), and mutex-held `kill()` to close the PID-reuse race. `resolvePtyWorkingDir` moved to `pty_backend.go` as planned. Legacy `ptyStart` kept for `TestPtyStart_RejectsInvalidDimensions` compile/behavior compat, but now honestly documented as non-functional (the real path is `conptyStart`) rather than silently pretending to work.
+  - Verified: `GOOS=windows go build/vet` clean, Windows test binary compiles; `go build`/`go vet`/`go test`/`go test -race` clean on macOS (63/63, unaffected); `make check` + `make lint` clean.
+- [x] **3.2** Windows-tagged test suite + un-skip stub-blocked tests
   - New `//go:build windows` file mirroring `TestTerminalService_CreateSession` shape. Darwin mock helpers don't exist on Windows — construct `&TerminalService{ptyBackend: newPtyBackend()}` inline. Assert on `ss.outputCh`, not Wails events (`wailsApp` is nil in tests).
   - Cover: start, write→read round-trip, resize, kill (incl. child processes), bad-working-dir fallback.
   - Un-skip the Phase 0.2 guards that were only skipped due to the stub; keep skips only for genuinely Unix-specific assertions.
   - Acceptance: Windows CI green with real ConPTY tests; macOS/Linux unaffected.
   - Verify: Windows CI + `go test ./...` on macOS.
-  - **→ Checkpoint 3**
+  - **Done, with the un-skip done at per-test granularity rather than blanket**: reviewed all 21 `newTestTerminalService` call sites and all 7 `testWithTerminalSvc` call sites individually.
+    - Un-skipped (now run for real on Windows): `TestTerminalBatching/Start/Write/Resize`, all 14 `TestTerminalService_*` multi-session tests, `TestRunCommand_FinalCmdNoWorkingDir/GetCommandError/NoHistoryPersistence/NoActiveSession/ExecutesOnActiveSession`, `TestTerminalService_ServiceStartupAssignsTerminalSvc`.
+    - Left skipped, with per-test reasons (not stub-blocked, genuinely platform-specific): `TestTerminalShutdown`/`TestTerminalExit` (call the raw `ptyStart` helper directly with Unix shell syntax `-c "sleep 60"`/`-c "exit 0"`); `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` (assert an exact `cd '<dir>' && ...` string — `shellQuoteDir` in `executor.go` always uses POSIX single-quote escaping, a real pre-existing cross-platform gap in command construction, flagged but explicitly out of scope for this PTY fix).
+    - New `pty_backend_windows_test.go`: `TestConptyBackend_WriteReadRoundTrip` (real echoed output observed on `outputCh`), `TestConptyBackend_CloseSessionTerminatesProcess` (confirms the OS process is actually gone via `OpenProcess` after `CloseSession`, not just that `TerminalService`'s bookkeeping cleared), `TestConptyBackend_BadWorkingDirFallback`, `TestConptyStart_RejectsInvalidDimensions`. Deliberately did not add a dedicated 200-cycle stress test — `TestTerminalService_ConcurrentAccess`/`ShutdownCleansAll`, now running for real on Windows, already create/close many sessions rapidly and would hang CI just as loudly if the pump/Close design had a deadlock.
+  - Verified: same as 3.1, plus `go mod tidy` clean.
+  - **→ Checkpoint 3 CONFIRMED on real CI** — workflow run [31874891892](https://github.com/loco1842/cmdex/actions/runs/31874891892): full `go test ./...` on Windows passed (`ok cmdex 11.398s`) — every spike test, every new integration test, and every newly-unskipped test, all against the real conpty backend, on real Windows hardware. `Type check`, `Test`, and all three `Build check` platforms also green.
 
 ## Phase 4 — Documentation
 
