@@ -1,0 +1,23 @@
+{
+  "skill_name": "github-issue-planner",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "whats open on github right now, anything worth doing this week?",
+      "expected_output": "Triggers the skill, fetches open issues via gh, categorizes and prioritizes them, writes/updates docs/issue-plans/TRIAGE.md, then asks the user which issue(s) to write a full plan for rather than planning everything unattended.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "plan out issue 56 for me, i want to actually see the code changes",
+      "expected_output": "Triggers the skill scoped to issue #56, reads the issue body/comments, reads the real files it would touch, and writes docs/issue-plans/issue-56-<slug>.md with concrete code snippets grounded in the actual codebase and file:line citations. Does not touch tasks/plan.md or tasks/todo.md.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "go ahead and implement the plan for 56 and put up a PR",
+      "expected_output": "Triggers --fix behavior: requires an existing plan for issue 56, creates a branch off the default branch, implements tasks one commit at a time, runs the project's verification gates, and stops to get explicit confirmation before pushing or opening a draft PR.",
+      "files": []
+    }
+  ]
+}
