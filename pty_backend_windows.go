@@ -36,6 +36,11 @@ import (
 // ServiceShutdown, so a bounded wait (log-and-leak) beats hanging the caller.
 const conptyCloseTimeout = 2 * time.Second
 
+// conptyKillTimeout bounds how long conptyProcess.kill's CALLER waits for
+// taskkill. See kill() below for why this does not shorten how long p.mu is
+// actually held.
+const conptyKillTimeout = 2 * time.Second
+
 // newPtyBackend returns the conpty-backed ptyBackend for windows.
 func newPtyBackend() ptyBackend {
 	return conptyBackend{}
@@ -65,9 +70,18 @@ func conptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...
 	// fail, silently trigger the dir-fallback retry below, and every cmd.exe
 	// session would lose its configured cwd. An absolute/volume-qualified
 	// path skips that code path entirely.
+	//
+	// If exec.LookPath itself fails to resolve "cmd" (PATH broken/altered),
+	// fall back to the hardcoded %SystemRoot%\System32 location rather than
+	// falling through to the bare name — same reasoning as killProcessGroup's
+	// taskkill resolution: a bare name is PATH-hijackable, and here it would
+	// additionally be resolved by conpty relative to the session's (possibly
+	// untrusted) working directory.
 	resolvedShellPath := shellPath
 	if resolved, err := exec.LookPath(shellPath); err == nil {
 		resolvedShellPath = resolved
+	} else if shellPath == "cmd" {
+		resolvedShellPath = sysRootPath("cmd.exe")
 	}
 
 	argv := []string{resolvedShellPath}
@@ -250,13 +264,38 @@ func (p *conptyProcess) terminate() {
 // mutex — and therefore keeping p.h open — for the duration of the
 // subprocess call prevents that race. This cannot deadlock Wait(): Wait's
 // blocking WaitForSingleObject call runs without holding p.mu (see above).
+//
+// kill itself, however, must not block its CALLER indefinitely: it sits on
+// the critical path of CloseSession/Stop, and ServiceShutdown closes
+// sessions sequentially, so one wedged taskkill.exe (unresponsive process,
+// AV interference — both real on Windows) would otherwise hang the whole
+// app's shutdown. The fix is to bound the CALLER's wait without shortening
+// how long p.mu is actually held: the goroutine below takes over ownership
+// of p.mu (Go's sync.Mutex has no goroutine affinity, so unlocking from a
+// different goroutine than the one that locked it is valid) and only
+// releases it once the real killProcessGroup call returns, however long
+// that takes — so finish() (which needs the same mutex to zero p.h) still
+// can never race a still-in-flight taskkill lookup. Only how long kill's
+// caller waits for the *result* is bounded.
 func (p *conptyProcess) kill() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.h == 0 {
+		p.mu.Unlock()
 		return nil
 	}
-	return killProcessGroup(p.pid)
+
+	done := make(chan error, 1)
+	go func() {
+		defer p.mu.Unlock()
+		done <- killProcessGroup(p.pid)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(conptyKillTimeout):
+		return fmt.Errorf("conptyProcess.kill: taskkill(pid=%d) did not return within %s (still running in background)", p.pid, conptyKillTimeout)
+	}
 }
 
 // conptyHandle adapts a *conpty.ConPty to ptyHandle.
@@ -447,15 +486,20 @@ func killProcessGroup(pid int) error {
 	if pid == 0 {
 		return nil
 	}
-	cmd := exec.Command(taskkillPath(), "/F", "/T", "/PID", strconv.Itoa(pid))
+	cmd := exec.Command(sysRootPath("taskkill.exe"), "/F", "/T", "/PID", strconv.Itoa(pid))
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd.Run()
 }
 
-func taskkillPath() string {
+// sysRootPath resolves name explicitly under %SystemRoot%\System32 rather
+// than via PATH (exec.Command/exec.LookPath with a bare name is
+// PATH-hijackable, and — for a bare "cmd" — charmbracelet/x/conpty resolves
+// an unresolved bare program name relative to the working directory, which
+// could be an untrusted session cwd; see conptyStart).
+func sysRootPath(name string) string {
 	root := os.Getenv("SystemRoot")
 	if root == "" {
 		root = `C:\Windows`
 	}
-	return root + `\System32\taskkill.exe`
+	return root + `\System32\` + name
 }
