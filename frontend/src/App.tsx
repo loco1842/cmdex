@@ -1281,6 +1281,30 @@ function App() {
         openTab(cmd);
     };
 
+    const handlePaletteExecute = useCallback(async (cmd: Command) => {
+        openTab(cmd);
+        const prompts = (await GetVariables(cmd.id)) || [];
+        const values: Record<string, string> = {};
+        let hasEmpty = false;
+        for (const p of prompts) {
+            if (p.defaultValue) {
+                values[p.name] = p.defaultValue;
+            } else {
+                hasEmpty = true;
+            }
+        }
+        // Defer past this render so activeTabIdRef (synced during render,
+        // see useSyncedRef.ts) reflects the tab openTab() just activated —
+        // otherwise runCommandDirect targets the previously active tab.
+        setTimeout(() => {
+            if (hasEmpty) {
+                handleFillVariablesByTab(cmd.id, values);
+            } else {
+                handleExecute(cmd.id, values);
+            }
+        }, 0);
+    }, [openTab, handleFillVariablesByTab, handleExecute]);
+
     /* eslint-disable react-hooks/refs -- keyboard shortcuts use ref-based handlers (not called during render) */
     useKeyboardShortcuts({
         [`${cmdOrCtrl}+p`]: () => setPaletteOpen(true),
@@ -1789,6 +1813,7 @@ function App() {
                     categories={categories}
                     onClose={() => setPaletteOpen(false)}
                     onOpen={handleSelectCommand}
+                    onExecute={handlePaletteExecute}
                 />
                 <Toaster position="bottom-right" richColors closeButton duration={3000} />
                 <KeyboardShortcutsDialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen} />
