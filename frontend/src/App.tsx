@@ -1025,7 +1025,10 @@ function App() {
     }, []);
 
     const runCommandDirect = useCallback(async (commandId: string, variables: Record<string, string>) => {
-        const execTabId = activeTabIdRef.current;
+        // The tab this execution belongs to is the command being run, not whatever
+        // tab happens to be active right now — those can diverge if the user
+        // switches tabs during an async gap before this fires (see PR #58 review).
+        const execTabId = commandId;
         executingTabIdRef.current = execTabId;
         setExecutingTabIdState(execTabId);
         expandTerminal();
@@ -1117,13 +1120,19 @@ function App() {
     }, []);
 
     const handleVariableSubmit = async (values: Record<string, string>) => {
-        if (!selectedCommand || isNewCommandTabId(selectedCommand.id)) return;
-        if (isSavedCommandDraftDirty(selectedCommand.id)) {
+        // Shared by both the fillVariables and managePresets modals — read the
+        // command id the modal was opened for, not whatever tab is currently
+        // selected. Those can diverge if the user switches tabs while this
+        // modal is still open (see PR #58 review).
+        if (modal.type !== 'fillVariables' && modal.type !== 'managePresets') return;
+        const commandId = modal.commandId;
+        if (isNewCommandTabId(commandId)) return;
+        if (isSavedCommandDraftDirty(commandId)) {
             toast.message(t('toast.saveBeforeExecute'));
             return;
         }
         setModal({ type: 'none' });
-        runCommandDirect(selectedCommand.id, values);
+        runCommandDirect(commandId, values);
     };
 
     const handleSavePreset = async (name: string, values: Record<string, string>) => {
