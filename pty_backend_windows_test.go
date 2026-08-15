@@ -316,21 +316,53 @@ func TestConptyProcess_WaitForSingleObjectFailure(t *testing.T) {
 
 // TestConptyProcess_GetExitCodeProcessFailure verifies Wait() returns the
 // real GetExitCodeProcess error rather than swallowing it to nil, exercised
-// independently of TestConptyProcess_WaitForSingleObjectFailure above: an
-// already-signaled event handle makes WaitForSingleObject succeed
-// immediately (it isn't a process handle, so GetExitCodeProcess on it fails
-// distinctly), reaching the second failure branch specifically.
+// independently of TestConptyProcess_WaitForSingleObjectFailure above.
+// GetExitCodeProcess requires PROCESS_QUERY_INFORMATION or
+// PROCESS_QUERY_LIMITED_INFORMATION access, unlike WaitForSingleObject
+// (SYNCHRONIZE alone suffices) — so a handle opened with only SYNCHRONIZE
+// to a real, already-exited process makes WaitForSingleObject succeed
+// immediately while GetExitCodeProcess fails on that same handle, reaching
+// the second failure branch specifically.
+//
+// An earlier version of this test used an already-signaled event handle
+// instead of a real process, assuming GetExitCodeProcess would reject any
+// non-process handle; real Windows CI showed it does not reliably fail
+// that way, so this uses an actual process with deliberately reduced
+// rights instead — the access check GetExitCodeProcess is documented to
+// make.
 func TestConptyProcess_GetExitCodeProcessFailure(t *testing.T) {
-	h, err := windows.CreateEvent(nil, 1, 1, nil)
-	if err != nil {
-		t.Fatalf("CreateEvent failed: %v", err)
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
 	}
 
-	p := newConptyProcess(0, h)
+	handle, proc, err := conptyStart(cmdExePath(t), "", "", 24, 80, "/C", "exit 0")
+	if err != nil {
+		t.Fatalf("conptyStart failed: %v", err)
+	}
+	defer func() { _ = handle.Close() }()
 
+	// Opened independently of conptyStart's own process handle, while the
+	// child is guaranteed still alive (or at least not yet reaped), so the
+	// PID cannot have been recycled out from under this call.
+	syncOnly, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(proc.Pid()))
+	if err != nil {
+		t.Fatalf("OpenProcess failed: %v", err)
+	}
+	// syncOnly is closed by p.Wait() below (via conptyProcess's own
+	// closeHandleLocked), same as every other handle this package's
+	// conptyProcess owns — no separate manual close needed.
+
+	// Reap the real process for real via the normal path, guaranteeing it
+	// has actually exited so WaitForSingleObject on syncOnly below returns
+	// immediately instead of blocking.
+	if _, err := proc.Wait(); err != nil {
+		t.Fatalf("Wait on the real process failed: %v", err)
+	}
+
+	p := newConptyProcess(0, syncOnly)
 	code, waitErr := p.Wait()
 	if waitErr == nil {
-		t.Fatal("Wait() with a non-process handle returned a nil error, want the real GetExitCodeProcess failure")
+		t.Fatal("Wait() with a SYNCHRONIZE-only handle returned a nil error, want the real GetExitCodeProcess access-denied failure")
 	}
 	if code != 0 {
 		t.Errorf("exitCode = %d, want 0", code)
