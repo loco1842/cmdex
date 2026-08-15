@@ -7,7 +7,7 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
 - [x] **0.1** Add `test-windows` CI job to `.github/workflows/ci.yml`
   - Acceptance: new job runs on `windows-latest`, does checkout → setup-go (`go-version-file: go.mod`) → create `frontend/dist/.gitkeep` → `go test ./...`. No pnpm/Playwright steps.
   - Verify: trigger via `workflow_dispatch`, confirm the job appears and executes.
-  - **Done:** added `test-windows` job to `.github/workflows/ci.yml` (checkout → setup-go → `frontend/dist/.gitkeep` → `go test ./...`, `workflow_dispatch`-gated like `test`). Not yet triggered on CI — first real trigger will happen at/before Phase 2's spike.
+  - **Done:** added `test-windows` job to `.github/workflows/ci.yml` (checkout → setup-go → `frontend/dist/.gitkeep` → `go test ./...`, `workflow_dispatch`-gated like `test`). Triggered on real Windows CI (see below) — confirmed working.
 - [x] **0.2** Guard Unix-only test assumptions so Windows CI is honest
   - `TestTerminalExit`: uses `-c`, `sleep 60`/`exit 0` — not valid on Windows shells.
   - `TestTerminalShutdown`: uses `proc.Signal(syscall.Signal(0))` — meaningless on Windows.
@@ -15,8 +15,9 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
   - Acceptance: Windows CI green with explicit, reasoned skips; macOS/Linux test count unchanged.
   - Verify: `go test ./...` on macOS (same pass count as before); Windows CI run green.
   - **Done:** single DRY skip added inside `newTestTerminalService` (all 21 real-backend test call sites funnel through it — covers `TestTerminalStart/Write/Resize/Shutdown/Exit` and all 14 `TestTerminalService_*` multi-session tests in one place, including the `TestTerminalShutdown`/`TestTerminalExit` Unix-specific args since those tests never reach that code once skipped). Separately fixed `TestTerminalDetectShell`'s pre-existing wrong assertion (compared against bare shell names; `detectShell()` returns `exec.LookPath`'s absolute path for pwsh/powershell) — now compares basenames. `TestPtyStart_RejectsInvalidDimensions` needed no change: the stub already errors unconditionally, so it passes vacuously today.
+  - **Fixed after first real CI run caught a gap:** the first Windows run (workflow run 31872382345) failed — 5 tests in `execution_service_test.go` construct `TerminalService` via `testWithTerminalSvc`/direct `ServiceStartup` rather than `newTestTerminalService`, so the guard above didn't cover them. `ServiceStartup` swallows `CreateSession` failure ("graceful degradation" — logs and returns `nil`), so the existing `t.Skipf(err != nil)` never fired; tests ran against the stub and failed on the resulting empty session state. Added the same `runtime.GOOS == "windows"` skip to `testWithTerminalSvc` and to `TestTerminalService_ServiceStartupAssignsTerminalSvc` directly (commit `33ba61a`).
   - Verified: `go build ./...`, `go vet ./...`, `go test ./...` (63 passed, same as baseline) on macOS; `GOOS=windows go build/vet ./...` clean; `GOOS=windows go test -c` produces a working test binary; `make lint` 0 issues.
-  - **→ Checkpoint 0 reached** (pending an actual CI run to confirm — no Windows machine locally, so this is verified by cross-compile + test-binary-compile only until the workflow is triggered on GitHub).
+  - **→ Checkpoint 0 CONFIRMED on real CI** — workflow run [31872608196](https://github.com/loco1842/cmdex/actions/runs/31872608196): `Test (Windows)`, `Test`, `Type check`, and all three `Build check` platforms (ubuntu/macos/windows) all green.
 
 ## Phase 1 — Interface refactor (platform-neutral, no behavior change)
 
