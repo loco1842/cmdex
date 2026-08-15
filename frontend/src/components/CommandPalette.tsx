@@ -8,6 +8,7 @@ import React, {
 import { type Command, type Category } from '../types';
 import { getCommandDisplayTitle } from '../utils/tab';
 import { Kbd, ShortcutLabel } from './ui/kbd';
+import { isCmdOrCtrl } from '../lib/shortcuts';
 import { FileText, Search, X } from 'lucide-react';
 
 interface CommandPaletteProps {
@@ -16,6 +17,7 @@ interface CommandPaletteProps {
   categories: Category[];
   onClose: () => void;
   onOpen: (cmd: Command) => void;
+  onExecute: (cmd: Command) => void;
 }
 
 function matches(query: string, cmd: Command): boolean {
@@ -60,6 +62,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   categories,
   onClose,
   onOpen,
+  onExecute,
 }) => {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -114,13 +117,17 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
         e.preventDefault();
         const cmd = filtered[activeIndex];
         if (!cmd) return;
-        onOpen(cmd);
+        if (isCmdOrCtrl(e)) {
+          onExecute(cmd);
+        } else {
+          onOpen(cmd);
+        }
         onClose();
       } else if (e.key === 'Escape') {
         onClose();
       }
     },
-    [filtered, activeIndex, onOpen, onClose],
+    [filtered, activeIndex, onOpen, onExecute, onClose],
   );
 
   if (!open) return null;
@@ -200,6 +207,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
         <div className="palette-footer">
           <span className="palette-hint"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
           <span className="palette-hint"><Kbd>↩</Kbd> open</span>
+          <span className="palette-hint"><ShortcutLabel id="execute" /> execute</span>
           <span className="palette-hint"><Kbd>Esc</Kbd> close</span>
           <span className="palette-hint" style={{ marginLeft: 'auto', opacity: 0.5 }}>
             {filtered.length} result{filtered.length !== 1 ? 's' : ''}
