@@ -1308,8 +1308,8 @@ func (db *DB) searchCommandsLike(query string) ([]Command, error) {
 
 func (db *DB) GetSettings() (AppSettings, error) {
 	defaults := AppSettings{
-		Locale: "en", Terminal: "",
-		Theme: "vscode-dark", LastDarkTheme: "vscode-dark", LastLightTheme: "vscode-light",
+		Locale: "en",
+		Theme:  "vscode-dark", LastDarkTheme: "vscode-dark", LastLightTheme: "vscode-light",
 		CustomThemes: "[]", UIFont: "Inter", MonoFont: "JetBrains Mono", Density: "comfortable",
 		DefaultWorkingDir: &OSPathMap{},
 	}
@@ -1348,9 +1348,6 @@ func (db *DB) SetSettings(s AppSettings) error {
 
 	if s.Locale != "" {
 		existing.Locale = s.Locale
-	}
-	if s.Terminal != "" {
-		existing.Terminal = s.Terminal
 	}
 	if s.Theme != "" {
 		existing.Theme = s.Theme
@@ -1432,7 +1429,6 @@ func (db *DB) ResetAll() error {
 	defaultSettingsW, defaultSettingsH := 640, 520
 	defaultSettings, _ := json.Marshal(AppSettings{
 		Locale:         "en",
-		Terminal:       "",
 		Theme:          "vscode-dark",
 		LastDarkTheme:  "vscode-dark",
 		LastLightTheme: "vscode-light",

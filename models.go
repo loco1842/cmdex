@@ -145,16 +145,9 @@ type ExecutionRecord struct {
 	ExecutedAt    time.Time `json:"executedAt"`
 }
 
-// TerminalInfo describes a detected terminal emulator
-type TerminalInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
 // AppSettings stores user preferences
 type AppSettings struct {
 	Locale            string     `json:"locale"`
-	Terminal          string     `json:"terminal"`                    // terminal ID; empty = auto-detect
 	Theme             string     `json:"theme"`                       // active theme ID
 	LastDarkTheme     string     `json:"lastDarkTheme"`               // last used dark theme
 	LastLightTheme    string     `json:"lastLightTheme"`              // last used light theme

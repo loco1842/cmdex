@@ -35,8 +35,3 @@ func (s *SettingsService) SetSettings(jsonStr string) error {
 	}
 	return db.SetSettings(settings)
 }
-
-// GetAvailableTerminals returns all detected terminal emulators.
-func (s *SettingsService) GetAvailableTerminals() []TerminalInfo {
-	return executor.GetAvailableTerminals()
-}
