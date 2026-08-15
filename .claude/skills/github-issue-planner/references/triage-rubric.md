@@ -45,7 +45,7 @@ Assign from impact × reach first; use effort only to break ties.
 
 ## Escalation test
 
-Escalate to the spec-driven-development skill (see SKILL.md Step 8) before writing a plan if **any** of these hold:
+Escalate to the spec-driven-development skill — or "Fallback B" in `fallback-prompts.md` if that plugin isn't installed (see SKILL.md Step 8) — before writing a plan if **any** of these hold:
 
 - Effort estimates at L or XL
 - The change touches two or more independent subsystems (e.g. a database schema change *and* new frontend state, or backend execution logic *and* UI at once)

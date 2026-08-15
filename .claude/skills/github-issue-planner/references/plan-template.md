@@ -54,7 +54,8 @@ to reconstruct later if someone questions the approach during review.
 
 ## Tasks
 
-Follow the planning-and-task-breakdown skill's task structure — each task
+Follow the planning-and-task-breakdown skill's task structure (or `fallback-prompts.md`
+"Fallback A" if that plugin isn't installed) — each task
 sized to land in one focused session (roughly 1-2 hours, touching at most
 ~5 files), with real code in the steps rather than descriptions of code.
 

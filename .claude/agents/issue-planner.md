@@ -41,7 +41,7 @@ Two failure modes worth naming, because both have produced real bugs here:
 
 ## Step 4: Decompose the work using the planning skill
 
-Don't invent your own task-breakdown method — invoke the **`agent-skills:planning-and-task-breakdown`** skill (the same one `/agent-skills:plan` runs) and follow its discipline:
+Don't invent your own task-breakdown method. Check the available-skills list for **`agent-skills:planning-and-task-breakdown`** (the skill `/agent-skills:plan` runs) and invoke it if present. **If it isn't installed** — it ships in a plugin, so don't assume it — use "Fallback A" in `.claude/skills/github-issue-planner/references/fallback-prompts.md`, which restates the same discipline self-contained. Either way, follow these steps:
 
 1. Stay in read-only plan mode — no code changes
 2. Identify the dependency graph between the components involved

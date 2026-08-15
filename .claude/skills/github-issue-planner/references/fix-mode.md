@@ -46,7 +46,7 @@ This matches the branch-naming convention already visible in the project's git h
 
 ## 4. Implement
 
-Work the plan's tasks **in order**, following the incremental-implementation discipline for each one:
+Work the plan's tasks **in order**, following the incremental-implementation discipline for each one (that skill ships in the `agent-skills` plugin — if it isn't installed here, "Fallback C" in `fallback-prompts.md` restates it self-contained):
 
 1. Implement the smallest complete slice for the task
 2. Run the relevant test/build step
