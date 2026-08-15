@@ -61,7 +61,7 @@ Before writing a plan (SKILL.md Step 9), confirm the issue is still an accurate 
 
 | Category | What "verified" looks like |
 |---|---|
-| **bug** | You read the exact code path the report implies and it plainly still produces the described behavior, *or* you reproduced it (ran the command, hit the UI flow). Check `git log --oneline -- <path>` for commits touching that area since the issue's `createdAt` — a later change may have already fixed it. |
+| **bug** | You read the exact code path the report implies and it plainly still produces the described behavior, *or* you reproduced it (ran the command, hit the UI flow). Check `git log --since="<issue's createdAt>" --oneline -- <path>` for commits touching that area since the issue was filed — a later change may have already fixed it. The `--since` bound matters: without it, a pre-issue commit can be mistaken for a later fix. |
 | **enhancement / idea** | You searched the codebase for the requested capability under any name and confirmed it genuinely doesn't exist yet. A feature request for something already shipped is stale, not a gap. |
 | **documentation** | You checked the current docs (`docs/`, `README.md`, inline comments) and confirmed the described gap or inaccuracy is still there. |
 | **question / duplicate / invalid** | These rarely warrant a plan at all — confirm which one it actually is (answer it, point at the duplicate, or explain why it's invalid) rather than planning around an unclear ask. |

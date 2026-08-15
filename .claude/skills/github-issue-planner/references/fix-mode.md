@@ -4,7 +4,7 @@
 
 ## 1. Resolve the plan
 
-Locate `docs/issue-plans/issue-<N>-*.md`. If an issue number wasn't given as an argument, look for plans at status `planned` in `TRIAGE.md`:
+Locate `docs/issue-plans/issue-<N>-*.md`, **excluding any `*.spec.md` file** — that's the escalation spec (see `SKILL.md` Step 8), not the implementation plan, even though it matches the same glob. When an issue was escalated, both files exist side by side; this step always resolves the plan, never the spec. If an issue number wasn't given as an argument, look for plans at status `planned` in `TRIAGE.md`:
 
 - Exactly one → use it.
 - More than one → list them and ask which to implement.
@@ -33,7 +33,7 @@ git fetch origin
 git switch -c <prefix>/issue-<N>-<slug> origin/<default-branch>
 ```
 
-Prefix by category from the plan's frontmatter:
+Prefix by category from the plan's `**Category:**` header field (a markdown header line, not literal YAML frontmatter — the plan template doesn't use frontmatter):
 
 | Category | Prefix |
 |---|---|
@@ -60,17 +60,12 @@ Do not use `/agent-skills:build auto` for this — it requires a root `SPEC.md` 
 
 ## 5. Verify
 
-After all tasks are implemented, run the project's actual verification gates — don't assume generic ones. For this project (see `CLAUDE.md` and `Makefile`):
+After all tasks are implemented, run the project's actual verification gates — don't assume generic ones, and don't approximate them either. Read `.github/workflows/ci.yml` (or this project's equivalent) to see what CI actually enforces, rather than guessing from `CLAUDE.md`/`Makefile` alone — a locally "reasonable" gate that's narrower than the real CI gate just means CI catches the problem later instead of now. For this project, CI runs `go test -race ./...` (not the bare form) and the e2e suite **unconditionally on every PR**, not only when frontend files changed:
 
 ```bash
 make check          # go build ./... && pnpm tsc --noEmit
 make lint           # golangci-lint run
-go test ./...
-```
-
-Run the frontend e2e suite too if any frontend files were touched:
-
-```bash
+go test -race ./...
 cd frontend && pnpm test:e2e
 ```
 
@@ -78,16 +73,20 @@ cd frontend && pnpm test:e2e
 
 ## 6. Commit the plan (and spec) into this branch
 
-The plan file (and its spec, if the issue was escalated) lives under `docs/issue-plans/` wherever it was originally written — often a different branch, or still uncommitted in whatever context wrote it. It will **not** exist on the fix branch unless you copy it over explicitly:
+The plan file (and its spec, if the issue was escalated) lives under `docs/issue-plans/` wherever it was originally written — often a different branch, or still uncommitted in whatever context wrote it. It will **not** exist on the fix branch unless you copy it over explicitly. Resolve the actual source concretely rather than treating it as a fill-in-the-blank — where it is depends on how you got here:
+
+- **Still in this same session's working tree** (the common case: Mode A ran earlier in the same conversation) — it's sitting uncommitted in whatever checkout that was (e.g. the main checkout you branched or worktree'd from). Use that real path.
+- **Already committed on another branch** — pull it without needing that branch checked out here: `git show <that-branch>:docs/issue-plans/issue-<N>-<slug>.md > /tmp/plan-<N>.md`.
 
 ```bash
 mkdir -p docs/issue-plans
-cp <path-to-original>/docs/issue-plans/issue-<N>-<slug>.md docs/issue-plans/
-git add docs/issue-plans/issue-<N>-<slug>.md
+cp <resolved-source>/issue-<N>-<slug>.md docs/issue-plans/
+cp <resolved-source>/issue-<N>-<slug>.spec.md docs/issue-plans/ 2>/dev/null   # only if one exists
+git add docs/issue-plans/issue-<N>-<slug>.md docs/issue-plans/issue-<N>-<slug>.spec.md 2>/dev/null
 git commit -m "docs: add plan for issue #<N>"
 ```
 
-Do this as its own small commit, separate from the task commits — it's supporting documentation, not part of the implementation. Skipping this step means the PR body's "Plan" link (step 9) points at a file that doesn't exist on this branch.
+Copy the spec too whenever one exists, not just the plan — an escalated issue's PR should carry its whole decision record, not half of it. Do this as its own small commit, separate from the task commits. Skipping this step means the PR body's "Plan" link (step 9) points at a file that doesn't exist on this branch.
 
 ## 7. Verify independently before asking for confirmation
 
@@ -95,13 +94,21 @@ Before showing the user anything, re-check the work yourself rather than trustin
 
 ```bash
 git diff origin/<default-branch>..HEAD
-go build ./... && go test ./...          # or this project's equivalent
+go build ./... && go test -race ./...    # or this project's equivalent — match step 5, not a shortcut of it
 cd frontend && pnpm tsc --noEmit
 ```
 
 Read the actual diff, not just the diffstat — confirm it matches the plan's file map and doesn't touch anything the plan marked out of scope. A subagent's final report describes what it *intended* to do; rerunning the gates yourself and reading the real diff is what confirms it actually happened.
 
 ## 8. Confirm before pushing
+
+First, confirm there's nothing uncommitted that the diff below would silently miss:
+
+```bash
+git status --porcelain
+```
+
+This must be empty. `git diff origin/<default-branch>..HEAD` (below) only shows *committed* history — if anything is still staged or unstaged, the user could approve a diff that doesn't match what actually gets pushed, because tests could have passed against code that never makes it into the push. Commit it or explicitly ask the user how to handle it — never discard without asking.
 
 Show the user:
 
@@ -144,8 +151,8 @@ https://github.com/<owner>/<repo>/blob/<branch>/docs/issue-plans/issue-<N>-<slug
 ## Test plan
 - [x] `make check`
 - [x] `make lint`
-- [x] `go test ./...`
-- [ ] `pnpm test:e2e` (if applicable)
+- [x] `go test -race ./...`
+- [x] `pnpm test:e2e`
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
@@ -156,6 +163,7 @@ Never pass anything other than `--draft`. Never call `gh pr merge`, `gh pr ready
 
 - Update the issue's row in `docs/issue-plans/TRIAGE.md`: status → `pr-open`, add the PR link.
 - Stamp the PR URL into the plan file's `**PR:**` header field (in whatever copy is the source of truth — the fix branch's copy doesn't need a self-referential update).
+- **Commit and push this update wherever you made it.** This isn't optional bookkeeping — until it's on a remote, the loop isn't actually closed, and these edits are easy to lose: they're typically made outside the fix branch itself (in the main checkout, or wherever Mode A originally ran), so nothing about finishing the fix branch's own push automatically carries them anywhere. In the parallel-worktree flow this matters even more — see step 4 below.
 - Report the PR URL to the user and stop. Do not comment on the GitHub issue itself unless asked.
 
 ## Parallelizing across multiple issues
@@ -171,16 +179,17 @@ git fetch origin
 git worktree add ../<repo>-issue-<N> -b <prefix>/issue-<N>-<slug> origin/<default-branch>
 ```
 
-Then spawn one subagent per worktree, each briefed with the full plan content directly in the prompt (fresh subagents have no context — don't assume they can read files from your current directory or an unrelated branch) and instructed to work **only through step 5** — resolve/implement/verify — then stop and report back its commit list, diffstat, and verification output. Explicitly tell each subagent not to push or open a PR.
+Then spawn one subagent per worktree, each briefed with the full plan content directly in the prompt (fresh subagents have no context — don't assume they can read files from your current directory or an unrelated branch). **You already created the branch above** (step 3) — instruct the subagent to start at plan resolution and preconditions (steps 1-2), skip branch creation entirely (it's already done; redoing it would fail since the branch already exists, or move the subagent off the branch you set up), then implement and verify (steps 4-5). Explicitly tell it not to push or open a PR.
 
 Once a subagent reports back, run steps 6-10 **yourself**, from your own shell, for that worktree:
 
 1. Commit the plan/spec into the branch (step 6).
 2. Re-verify independently (step 7) — don't skip this just because it ran unattended.
 3. Push and open the draft PR only after showing the user the diff and getting confirmation (step 8) — this has to reach an actual human, which a background subagent cannot obtain on its own.
-4. Update `TRIAGE.md` and the plan file, then remove the worktree:
+4. Update `TRIAGE.md` and the plan file **in your own shell, not inside the worktree** — then commit and push that update (step 10) *before* removing the worktree:
    ```bash
    git worktree remove ../<repo>-issue-<N>
    ```
+   Removing the worktree discards anything left uncommitted inside it — if the close-loop edits were made there instead of in your own shell, they're gone the moment this command runs.
 
 If two issues' plans touch overlapping files, don't parallelize those two — implement them sequentially so the second one is grounded in the first one's actual result rather than a plan written against a codebase that already changed underneath it.

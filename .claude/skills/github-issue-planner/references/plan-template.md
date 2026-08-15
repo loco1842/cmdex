@@ -2,7 +2,7 @@
 
 Save to `docs/issue-plans/issue-<N>-<slug>.md`. This mirrors the existing plan style already used in this project (`docs/superpowers/plans/*.md`: Goal / Architecture / File Map / numbered tasks with checkbox steps and inline code), with issue metadata added at the top so the file is self-contained without needing to open GitHub.
 
-```markdown
+````markdown
 # Issue #<N>: <title, conventional-commit prefix stripped>
 
 **Issue:** <github issue URL>
@@ -25,8 +25,8 @@ it — not a restatement of the Problem section. Cite what you checked:
 - **Reproduced/confirmed by:** <e.g. "read `Spotlight.tsx:40-58`, no keydown
   handler for Enter while a modifier is held" or "ran the repro steps, still
   fails on current `main`">
-- **Checked for a prior fix:** `git log --oneline -- <path>` since
-  <issue's createdAt> — <found nothing relevant / found X, doesn't cover this>
+- **Checked for a prior fix:** `git log --since="<issue's createdAt>" --oneline -- <path>`
+  — <found nothing relevant / found X, doesn't cover this>
 - **Checked it doesn't already exist (feature requests only):** <where you
   searched and what you found>
 
@@ -101,4 +101,4 @@ Anything that needs a human answer before or during implementation. Empty is
 fine — it just means nothing came up.
 
 - <question, if any>
-```
+````
