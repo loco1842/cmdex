@@ -97,14 +97,21 @@ See `tasks/plan.md` for full context, the `ptyBackend` contract, and rationale.
 
 ## Phase 4 — Documentation
 
-- [ ] **4.1** Update stub notes and fix stale cross-reference
+- [x] **4.1** Update stub notes and fix stale cross-reference
   - `AGENTS.md:145`: update "conpty backend is a stub" note to reflect reality; fix the path — points at `.planning/phases/25-polish-integration/CHECKPOINT.md`, actual path is `.planning/milestones/v2.1-phases/25-polish-integration/CHECKPOINT.md`.
   - `CLAUDE.md:250`: update "Windows conpty backend is currently a stub" note.
   - Record deferred items (`buildPtyEnv` Windows correctness, `\n` vs `\r` line submission) as known limitations, not silently dropped.
   - Verify: `rg -i "not yet implemented|conpty.*stub"` returns nothing stale.
+  - **Done:** `AGENTS.md`'s Tests section rewritten to describe the real backend, its CI coverage (`test-windows` job, `pty_backend_windows_test.go`, the Phase 2 spike), and which tests remain Windows-skipped and why (not backend-related). Dropped the stale `.planning/phases/...` cross-reference entirely from the live section rather than just fixing its path — a "current gap" pointer has no place once the gap is closed; the historical checkpoint file itself is untouched. Added a new "Known Cross-Platform Gaps (Windows)" section covering all three deferred items found during this work (`buildPtyEnv`, `\n`/`\r`, and the `shellQuoteDir` POSIX-only quoting gap found in Phase 3). `CLAUDE.md`'s one-line stack note updated to match.
+  - Verified: `grep -rniE "not yet implemented|conpty.*stub"` across `*.go`/`*.md` (excluding `tasks/`, `.planning/`, `SPEC.md`, `.memsearch/`) returns nothing; `go build`/`go vet`/`go test ./...` clean (63/63); `make lint` clean.
 
-## Deferred (not in this plan's scope — documented only)
+## Deferred (not in this plan's scope — documented in AGENTS.md "Known Cross-Platform Gaps")
 
 - `buildPtyEnv` (`pty_env.go:27`): Windows `os.Environ()` hidden `=C:=C:\...` entries collapse into a malformed key under `strings.Cut`; env var names are case-insensitive on Windows but the map keys case-sensitively.
 - `execution_service.go:153`: injected command lines end with `\n`; Windows shells generally expect `\r` to submit.
-- **Flagged, not decided:** after a clean shell exit, `monitorExit` returns without ever closing `ss.ptmx`. Harmless-ish fd behavior on macOS/Linux; on Windows it holds a live `conhost.exe` alive until the session restarts or closes. Fixing it touches `terminal_service.go`'s intentional-exit branch, which Phase 1 is scoped to leave behavior-unchanged on macOS/Linux — so this needs an explicit call from the user (fast-follow vs. fold into Phase 3) rather than silently doing it.
+- `executor.go`'s `shellQuoteDir`: always uses POSIX single-quote escaping for the `cd '<dir>' && ...` prefix `RunCommand` builds — meaningless to cmd.exe/PowerShell. Found during Phase 3; `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` are Windows-skipped because of it.
+- **Flagged, not decided:** after a clean shell exit, `monitorExit` returns without ever closing `ss.ptmx`. Harmless-ish fd behavior on macOS/Linux; on Windows it holds a live `conhost.exe` alive until the session restarts or closes. Fixing it touches `terminal_service.go`'s intentional-exit branch, which Phase 1 is scoped to leave behavior-unchanged on macOS/Linux — so this needs an explicit call from the user (fast-follow vs. fold into Phase 3) rather than silently doing it. **Still open** — not addressed anywhere in Phases 1–4.
+
+## Plan status: all four phases complete, all four checkpoints confirmed on real CI
+
+Windows terminal sessions now work end-to-end (start, type, see output, resize, close) via a real `github.com/charmbracelet/x/conpty`-backed implementation, verified on real Windows hardware through this repo's CI. Three items remain deliberately open, listed above: the `ss.ptmx`-not-closed-on-clean-exit fd/conhost leak (flagged for a user decision, never made unilaterally), and the two pre-existing cross-platform gaps in command construction (`buildPtyEnv`, `shellQuoteDir`) documented in `AGENTS.md`.
