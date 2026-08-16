@@ -13,15 +13,23 @@ if [ "$HISTFILE" = "$ZDOTDIR/.zsh_history" ]; then
     HISTFILE="${CMDEX_USER_ZDOTDIR:-$HOME}/.zsh_history"
 fi
 
-if [ -n "$CMDEX_USER_ZDOTDIR" ] && [ -r "$CMDEX_USER_ZDOTDIR/.zshrc" ]; then
-    source "$CMDEX_USER_ZDOTDIR/.zshrc"
-fi
+# Restore ZDOTDIR to the user's real dotfile directory BEFORE sourcing their
+# .zshrc, not after: their config may itself reference $ZDOTDIR (a common
+# pattern for locating a plugin/alias file alongside .zshrc, e.g. `source
+# "$ZDOTDIR/aliases.zsh"`), and until this line it still points at Cmdex's
+# own integration directory, not theirs — such a reference would silently
+# fail to load. This also means anything spawned from within this session —
+# a nested interactive zsh, a script with a zsh shebang — gets their normal
+# setup instead of Cmdex's, and zsh reads $ZDOTDIR fresh before looking for
+# .zlogin, so this makes their real .zlogin load next too, without Cmdex
+# needing to ship one of its own.
+if [ -n "$CMDEX_USER_ZDOTDIR" ]; then
+    userZDOTDIR="$CMDEX_USER_ZDOTDIR"
+    export ZDOTDIR="$userZDOTDIR"
+    unset CMDEX_USER_ZDOTDIR
 
-# The user's own config has now loaded. Restore ZDOTDIR to their real
-# dotfile directory so anything spawned from within this session — a nested
-# interactive zsh, a script with a zsh shebang — gets their normal setup
-# instead of Cmdex's. zsh reads $ZDOTDIR fresh before looking for .zlogin, so
-# this also makes their real .zlogin load next, without Cmdex needing to
-# ship one of its own.
-export ZDOTDIR="$CMDEX_USER_ZDOTDIR"
-unset CMDEX_USER_ZDOTDIR
+    if [ -r "$userZDOTDIR/.zshrc" ]; then
+        source "$userZDOTDIR/.zshrc"
+    fi
+    unset userZDOTDIR
+fi

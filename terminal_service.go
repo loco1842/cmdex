@@ -76,12 +76,19 @@ type sessionState struct {
 	workingDir string
 	createdAt  time.Time
 
-	mu              sync.Mutex
-	ptmx            ptyHandle
-	proc            ptyProcess
-	shellPath       string
-	shellFlag       string
-	lastSize        ptyWinsize
+	mu        sync.Mutex
+	ptmx      ptyHandle
+	proc      ptyProcess
+	shellPath string
+	shellFlag string
+	lastSize  ptyWinsize
+	// oscNonce is the current shell process's OSC-marker nonce (empty if
+	// this session isn't running with shell integration active). Set once
+	// under ss.mu by startSessionLocked before readLoop's goroutine starts,
+	// and read only from that same goroutine (via captureScan) thereafter,
+	// so no further locking is needed — see oscNonceEnvVar in
+	// shell_integration.go and stripNonce in terminal_capture.go.
+	oscNonce        string
 	stopCh          chan struct{}
 	running         bool
 	starting        bool
@@ -443,11 +450,15 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	launchFlag := shellFlag
 	var opts shellLaunchOpts
 	integrated := false
+	var nonce string
 	if s.shellIntegrationDir != "" && shellIntegrationEnabled() {
-		if flag, sOpts, ok := integrationFor(shellPath, shellFlag, s.shellIntegrationDir); ok {
-			launchFlag = flag
-			opts = sOpts
-			integrated = true
+		if n, nErr := generateOSCNonce(); nErr == nil {
+			if flag, sOpts, ok := integrationFor(shellPath, shellFlag, s.shellIntegrationDir, n); ok {
+				launchFlag = flag
+				opts = sOpts
+				integrated = true
+				nonce = n
+			}
 		}
 	}
 
@@ -471,6 +482,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 
 	ss.shellPath = shellPath
 	ss.shellFlag = shellFlag
+	ss.oscNonce = nonce
 	ss.lastSize = ptyWinsize{Rows: uint16(rows), Cols: uint16(cols)}
 	ss.ptmx = handle
 	ss.proc = proc

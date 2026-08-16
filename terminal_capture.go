@@ -10,8 +10,8 @@ import (
 // by shell_integration.go. A shell with integration active wraps every
 // command with:
 //
-//	ESC ] 133 ; C BEL   -- emitted just before the command's output begins
-//	ESC ] 133 ; D ; <exit-code> BEL   -- emitted once the command has finished
+//	ESC ] 133 ; C ; <nonce> BEL                     -- emitted just before the command's output begins
+//	ESC ] 133 ; D ; <nonce> ; <exit-code> BEL       -- emitted once the command has finished
 //
 // captureScan watches the raw PTY byte stream for these markers and records
 // the bytes between the most recent C and D as sessionState.lastOutput, so
@@ -20,6 +20,12 @@ import (
 // running a shell without integration never see these markers, so
 // lastValid stays false forever and the frontend falls back to scraping the
 // xterm buffer (Terminal.tsx's getLastOutput).
+//
+// <nonce> is a random per-session token (sessionState.oscNonce, set from
+// generateOSCNonce in shell_integration.go) that only the shell's own
+// preexec/precmd hooks know — see stripNonce. Without it, a command could
+// print these exact bytes as part of its own output and trick the scanner
+// into treating that as a real boundary.
 const (
 	// oscCapturePrefix is the fixed portion of the markers this scanner
 	// looks for, shared by both the "C" (output start) and "D" (command
@@ -134,6 +140,21 @@ func (ss *sessionState) captureScan(data []byte) {
 			return
 		}
 
+		params, nonceOK := stripNonce(buf[kindIdx+1:termIdx], ss.oscNonce)
+		if !nonceOK {
+			// The nonce doesn't match this session's (or this session has
+			// none), so this can't be a marker genuinely emitted by the
+			// shell's own preexec/precmd hooks — it's a command printing
+			// the same OSC 133 bytes in its own output, whether by
+			// coincidence or deliberately, to fool GetLastOutput into
+			// resetting or closing the capture early (see stripNonce).
+			// Keep the bytes as literal captured content instead of acting
+			// on them as a boundary.
+			ss.appendCapture(buf[escIdx : termIdx+termLen])
+			i = termIdx + termLen
+			continue
+		}
+
 		switch kind {
 		case 'C':
 			ss.capBuf.Reset()
@@ -142,7 +163,7 @@ func (ss *sessionState) captureScan(data []byte) {
 		case 'D':
 			if ss.capturing {
 				ss.lastOutput = stripANSI(ss.capBuf.String())
-				ss.lastExitCode = parseExitCode(buf[kindIdx+1 : termIdx])
+				ss.lastExitCode = parseExitCode(params)
 				ss.lastTruncated = ss.capTruncated
 				ss.lastValid = true
 				ss.capturing = false
@@ -153,6 +174,29 @@ func (ss *sessionState) captureScan(data []byte) {
 
 		i = termIdx + termLen
 	}
+}
+
+// stripNonce verifies that params (the raw bytes between an OSC 133
+// marker's kind byte and its terminator, e.g. ";a1b2;0") begin with
+// ";<nonce>", returning whatever follows — e.g. ";0" for a "D" marker's exit
+// code, or empty for "C". nonce is this session's expected value (see
+// oscNonceEnvVar in shell_integration.go); a session with no nonce (shell
+// integration inactive) never matches, so no marker from an uninstrumented
+// shell is ever trusted.
+//
+// This authentication is what makes it safe for captureScan to trust a "C"/
+// "D" marker at all: without it, a command could print the literal bytes
+// "\x1b]133;D;0\a" as part of its own output and trick the scanner into
+// treating that as the shell's real end-of-command boundary.
+func stripNonce(params []byte, nonce string) ([]byte, bool) {
+	if nonce == "" {
+		return nil, false
+	}
+	prefix := append([]byte{';'}, nonce...)
+	if !bytes.HasPrefix(params, prefix) {
+		return nil, false
+	}
+	return params[len(prefix):], true
 }
 
 // appendCapture writes b to capBuf when a command's output is actively being

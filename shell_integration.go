@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -35,6 +37,32 @@ const shellIntegrationDirName = "shell-integration"
 // so the integration scripts (and a curious user, via `echo
 // $CMDEX_SHELL_INTEGRATION`) can detect that it's active.
 const shellIntegrationEnvFlag = "CMDEX_SHELL_INTEGRATION=1"
+
+// oscNonceEnvVar carries a fresh per-session random token into the shell via
+// its environment, so the integration scripts can embed it in every "C"/"D"
+// marker they emit. Each script reads it into a non-exported shell variable
+// and immediately unsets it (see e.g. shell-integration/bash/cmdex-bashrc.sh)
+// so no process the shell ever spawns can read it back out of its own
+// environment. terminal_capture.go's captureScan only trusts a marker whose
+// params carry this exact value, which is what lets it tell a marker
+// genuinely emitted by the shell's own hooks apart from a command that
+// simply prints the same OSC 133 bytes in its own output — see stripNonce.
+const oscNonceEnvVar = "CMDEX_OSC_NONCE"
+
+// oscNonceBytes is the random nonce length generateOSCNonce reads from
+// crypto/rand: 128 bits, far more entropy than a command running inside the
+// session could ever feasibly guess.
+const oscNonceBytes = 16
+
+// generateOSCNonce returns a fresh random token for oscNonceEnvVar, unique to
+// one shell session.
+func generateOSCNonce() (string, error) {
+	b := make([]byte, oscNonceBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate OSC nonce: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // setupShellIntegrationDir materializes the embedded shell-integration
 // scripts to ~/.cmdex/shell-integration, overwriting whatever is already
@@ -116,7 +144,7 @@ func shellIntegrationEnabled() bool {
 // this app has no integration for, ...), the caller should launch exactly as
 // it would have without shell integration; effectiveFlag/opts are zero
 // values in that case.
-func integrationFor(shellPath, shellFlag, intDir string) (string, shellLaunchOpts, bool) {
+func integrationFor(shellPath, shellFlag, intDir, nonce string) (string, shellLaunchOpts, bool) {
 	base := strings.TrimSuffix(strings.ToLower(filepath.Base(shellPath)), ".exe")
 
 	var flag string
@@ -135,9 +163,9 @@ func integrationFor(shellPath, shellFlag, intDir string) (string, shellLaunchOpt
 		return "", shellLaunchOpts{}, false
 	}
 
-	// Every integrated shell needs this flag; prepending it here once means
-	// the per-shell functions below only supply their shell-specific entries.
-	opts.ExtraEnv = append([]string{shellIntegrationEnvFlag}, opts.ExtraEnv...)
+	// Every integrated shell needs these; prepending them here once means
+	// the per-shell functions above only supply their shell-specific entries.
+	opts.ExtraEnv = append([]string{shellIntegrationEnvFlag, oscNonceEnvVar + "=" + nonce}, opts.ExtraEnv...)
 	return flag, opts, ok
 }
 

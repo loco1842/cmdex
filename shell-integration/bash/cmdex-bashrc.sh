@@ -10,6 +10,16 @@
 # .bash_profile is free to source .bashrc itself, same as on a real login
 # terminal).
 
+# Capture the per-session OSC nonce (see generateOSCNonce in
+# shell_integration.go and stripNonce in terminal_capture.go) into a
+# non-exported shell variable, then scrub it from the environment before
+# anything below — the user's own profile, or any command it or the user
+# runs — can execute. A child process only ever sees exported environment
+# variables, so once unset here, nothing spawned from this shell can read the
+# nonce and use it to forge a "C"/"D" marker in its own output.
+__cmdex_nonce="$CMDEX_OSC_NONCE"
+unset CMDEX_OSC_NONCE
+
 if [ -r /etc/profile ]; then
     source /etc/profile
 fi
@@ -31,17 +41,24 @@ fi
 # top-level command rather than once per simple command. It starts at 0 (not
 # armed) so nothing fires while this file itself — or the user's own sourced
 # profile above — is still running; it only becomes armed once
-# __cmdex_prompt_command has run for the first time, i.e. right before the
+# __cmdex_emit_marker has run for the first time, i.e. right before the
 # first real prompt is shown to the user.
 #
-# __cmdex_prompt_command is appended LAST to PROMPT_COMMAND (after whatever
-# the user's own profile may have set), so armed only flips back to 1 once
-# bash is done running everything queued for after a command finishes — the
-# very next DEBUG trap firing after that is genuinely the user's next typed
-# command, not more of our/their own prompt machinery. Capturing $? as the
-# first statement of __cmdex_prompt_command is what makes the reported exit
-# code reliable: it reads $? before any other statement (even a `[` test)
-# gets a chance to run and overwrite it.
+# The work done once a command finishes is deliberately split into two
+# PROMPT_COMMAND entries rather than one:
+#
+#   - __cmdex_capture_exit is PREPENDED, so it runs BEFORE whatever the
+#     user's own profile may have put in PROMPT_COMMAND (git-prompt.sh,
+#     starship, a timing plugin, ...). Those commonly run commands of their
+#     own, which overwrite $? — capturing it first, before any of that runs,
+#     is the only way the reported exit code reliably reflects the command
+#     the user actually typed rather than the last thing the user's own
+#     prompt machinery happened to run.
+#   - __cmdex_emit_marker is APPENDED LAST (after whatever the user's own
+#     profile may have set), so armed only flips back to 1 once bash is done
+#     running everything queued for after a command finishes — the very next
+#     DEBUG trap firing after that is genuinely the user's next typed
+#     command, not more of our/their own prompt machinery.
 #
 # Known limitation: bash allows only one DEBUG trap handler at a time. If the
 # user's own profile also relies on one (e.g. a command-timing tool), it is
@@ -52,15 +69,18 @@ __cmdex_armed=0
 __cmdex_debug_trap() {
     if [ "$__cmdex_armed" = "1" ]; then
         __cmdex_armed=0
-        printf '\e]133;C\a'
+        printf '\e]133;C;%s\a' "$__cmdex_nonce"
     fi
 }
 
-__cmdex_prompt_command() {
-    local __cmdex_ec=$?
-    printf '\e]133;D;%s\a' "$__cmdex_ec"
+__cmdex_capture_exit() {
+    __cmdex_ec=$?
+}
+
+__cmdex_emit_marker() {
+    printf '\e]133;D;%s;%s\a' "$__cmdex_nonce" "$__cmdex_ec"
     __cmdex_armed=1
 }
 
 trap '__cmdex_debug_trap' DEBUG
-PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}__cmdex_prompt_command"
+PROMPT_COMMAND="__cmdex_capture_exit${PROMPT_COMMAND:+$'\n'$PROMPT_COMMAND}"$'\n'"__cmdex_emit_marker"

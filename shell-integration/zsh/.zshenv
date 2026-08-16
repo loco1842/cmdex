@@ -18,6 +18,16 @@
 # precmd hooks (e.g. anything that shells out for git status) can clobber it
 # before a later-registered hook gets to read it.
 
+# Capture the per-session OSC nonce (see generateOSCNonce in
+# shell_integration.go and stripNonce in terminal_capture.go) into a
+# non-exported shell variable, then scrub it from the environment before the
+# user's own .zshenv — or anything it runs — can execute. A child process
+# only ever sees exported environment variables, so once unset here, nothing
+# spawned from this shell can read the nonce and use it to forge a "C"/"D"
+# marker in its own output.
+__cmdex_nonce="$CMDEX_OSC_NONCE"
+unset CMDEX_OSC_NONCE
+
 if [ -n "$CMDEX_USER_ZDOTDIR" ] && [ -r "$CMDEX_USER_ZDOTDIR/.zshenv" ]; then
     source "$CMDEX_USER_ZDOTDIR/.zshenv"
 fi
@@ -27,7 +37,7 @@ autoload -Uz add-zsh-hook
 # __cmdex_preexec fires just before a command's output starts, i.e. right as
 # the command begins executing.
 __cmdex_preexec() {
-    print -n '\e]133;C\a'
+    print -n "\e]133;C;$__cmdex_nonce\a"
 }
 
 # __cmdex_precmd fires once the command has finished, right before zsh
@@ -35,7 +45,8 @@ __cmdex_preexec() {
 # reading it as literally the first thing in this function (before any other
 # statement can run and change it) is what makes that reliable.
 __cmdex_precmd() {
-    print -n "\e]133;D;$?\a"
+    local __cmdex_ec=$?
+    print -n "\e]133;D;$__cmdex_nonce;$__cmdex_ec\a"
 }
 
 add-zsh-hook preexec __cmdex_preexec

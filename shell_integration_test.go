@@ -14,7 +14,7 @@ import (
 func TestIntegrationFor_Zsh(t *testing.T) {
 	t.Setenv("ZDOTDIR", "/Users/someone/.dotfiles/zsh")
 
-	flag, opts, ok := integrationFor("/bin/zsh", "-l", "/tmp/cmdex-integration")
+	flag, opts, ok := integrationFor("/bin/zsh", "-l", "/tmp/cmdex-integration", "test-nonce")
 	if !ok {
 		t.Fatal("expected ok=true for zsh")
 	}
@@ -35,6 +35,26 @@ func TestIntegrationFor_Zsh(t *testing.T) {
 	if env["CMDEX_SHELL_INTEGRATION"] != "1" {
 		t.Errorf("CMDEX_SHELL_INTEGRATION = %q, want \"1\"", env["CMDEX_SHELL_INTEGRATION"])
 	}
+	if env["CMDEX_OSC_NONCE"] != "test-nonce" {
+		t.Errorf("CMDEX_OSC_NONCE = %q, want %q", env["CMDEX_OSC_NONCE"], "test-nonce")
+	}
+}
+
+func TestGenerateOSCNonce_ReturnsUniqueValues(t *testing.T) {
+	a, err := generateOSCNonce()
+	if err != nil {
+		t.Fatalf("generateOSCNonce failed: %v", err)
+	}
+	b, err := generateOSCNonce()
+	if err != nil {
+		t.Fatalf("generateOSCNonce failed: %v", err)
+	}
+	if a == "" || b == "" {
+		t.Fatal("expected non-empty nonces")
+	}
+	if a == b {
+		t.Error("expected two calls to generateOSCNonce to return different values")
+	}
 }
 
 func TestIntegrationFor_ZshFallsBackToHomeWhenZDOTDIRUnset(t *testing.T) {
@@ -42,7 +62,7 @@ func TestIntegrationFor_ZshFallsBackToHomeWhenZDOTDIRUnset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	_, opts, ok := integrationFor("/bin/zsh", "-l", "/tmp/cmdex-integration")
+	_, opts, ok := integrationFor("/bin/zsh", "-l", "/tmp/cmdex-integration", "test-nonce")
 	if !ok {
 		t.Fatal("expected ok=true for zsh")
 	}
@@ -53,7 +73,7 @@ func TestIntegrationFor_ZshFallsBackToHomeWhenZDOTDIRUnset(t *testing.T) {
 }
 
 func TestIntegrationFor_Bash(t *testing.T) {
-	flag, opts, ok := integrationFor("/bin/bash", "-l", "/tmp/cmdex-integration")
+	flag, opts, ok := integrationFor("/bin/bash", "-l", "/tmp/cmdex-integration", "test-nonce")
 	if !ok {
 		t.Fatal("expected ok=true for bash")
 	}
@@ -69,7 +89,7 @@ func TestIntegrationFor_Bash(t *testing.T) {
 func TestIntegrationFor_Fish(t *testing.T) {
 	t.Setenv("XDG_DATA_DIRS", "/usr/share")
 
-	flag, opts, ok := integrationFor("/usr/local/bin/fish", "-l", "/tmp/cmdex-integration")
+	flag, opts, ok := integrationFor("/usr/local/bin/fish", "-l", "/tmp/cmdex-integration", "test-nonce")
 	if !ok {
 		t.Fatal("expected ok=true for fish")
 	}
@@ -87,7 +107,7 @@ func TestIntegrationFor_Fish(t *testing.T) {
 }
 
 func TestIntegrationFor_Pwsh(t *testing.T) {
-	flag, opts, ok := integrationFor("/usr/local/bin/pwsh", "-NoLogo", "/tmp/cmdex-integration")
+	flag, opts, ok := integrationFor("/usr/local/bin/pwsh", "-NoLogo", "/tmp/cmdex-integration", "test-nonce")
 	if !ok {
 		t.Fatal("expected ok=true for pwsh")
 	}
@@ -103,7 +123,7 @@ func TestIntegrationFor_Pwsh(t *testing.T) {
 // usernames, e.g. C:\Users\O'Brien) must not break the generated
 // -Command's PowerShell single-quoted string.
 func TestIntegrationFor_PwshEscapesApostropheInPath(t *testing.T) {
-	_, opts, ok := integrationFor("/usr/local/bin/pwsh", "-NoLogo", "/tmp/O'Brien/cmdex-integration")
+	_, opts, ok := integrationFor("/usr/local/bin/pwsh", "-NoLogo", "/tmp/O'Brien/cmdex-integration", "test-nonce")
 	if !ok {
 		t.Fatal("expected ok=true for pwsh")
 	}
@@ -130,17 +150,17 @@ func TestIntegrationFor_PwshEscapesApostropheInPath(t *testing.T) {
 // this test wants to exercise (integrationFor's case/".exe" handling of
 // whatever basename it's given).
 func TestIntegrationFor_WindowsExeSuffixIsCaseInsensitive(t *testing.T) {
-	if _, _, ok := integrationFor("/Program Files/PowerShell/7/PWSH.EXE", "-NoLogo", "/intdir"); !ok {
+	if _, _, ok := integrationFor("/Program Files/PowerShell/7/PWSH.EXE", "-NoLogo", "/intdir", "test-nonce"); !ok {
 		t.Error("expected ok=true for PWSH.EXE (case-insensitive, .exe stripped)")
 	}
-	if _, _, ok := integrationFor("/Windows/System32/Bash.exe", "-l", "/intdir"); !ok {
+	if _, _, ok := integrationFor("/Windows/System32/Bash.exe", "-l", "/intdir", "test-nonce"); !ok {
 		t.Error("expected ok=true for Bash.exe")
 	}
 }
 
 func TestIntegrationFor_UnknownShellsReturnNotOk(t *testing.T) {
 	for _, shell := range []string{"cmd", "/bin/sh", "/bin/dash", "/usr/bin/ksh", ""} {
-		if _, _, ok := integrationFor(shell, "", "/tmp/cmdex-integration"); ok {
+		if _, _, ok := integrationFor(shell, "", "/tmp/cmdex-integration", "test-nonce"); ok {
 			t.Errorf("integrationFor(%q) = ok=true, want ok=false (no integration for this shell)", shell)
 		}
 	}

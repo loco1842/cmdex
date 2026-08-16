@@ -19,6 +19,20 @@
 #     and D-only markers still let GetLastOutput ignore stray D's the same
 #     way it does for zsh/bash's own startup-time D-with-no-C case.
 
+# Capture the per-session OSC nonce (see generateOSCNonce in
+# shell_integration.go and stripNonce in terminal_capture.go) into a global
+# variable, then scrub it from the environment — a child process only ever
+# sees exported environment variables, so once removed here, nothing spawned
+# from this shell can read the nonce and use it to forge a "C"/"D" marker in
+# its own output. This runs after $PROFILE (pwsh has no earlier hook to
+# scrub it from), so a command the user's own profile ran before this point
+# could in principle still have seen it — an unavoidable gap given pwsh's
+# lack of a preexec-style hook, but everything from here on is protected.
+if (-not (Test-Path Variable:\global:cmdexNonce)) {
+    $global:cmdexNonce = $env:CMDEX_OSC_NONCE
+    Remove-Item Env:\CMDEX_OSC_NONCE -ErrorAction SilentlyContinue
+}
+
 if (-not (Test-Path Function:\global:__cmdex_original_prompt)) {
     Rename-Item Function:\global:prompt Function:\global:__cmdex_original_prompt -ErrorAction SilentlyContinue
 
@@ -29,7 +43,7 @@ if (-not (Test-Path Function:\global:__cmdex_original_prompt)) {
         # native commands alike); $LASTEXITCODE is only ever set by native
         # commands, so it's used as a numeric fallback when $? is false.
         $cmdexExitCode = if ($?) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
-        [Console]::Out.Write("`e]133;D;$cmdexExitCode`a")
+        [Console]::Out.Write("`e]133;D;$cmdexNonce;$cmdexExitCode`a")
         & (Get-Command __cmdex_original_prompt -CommandType Function)
     }
 }
@@ -40,7 +54,7 @@ if ((Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction Silent
 
     function global:PSConsoleHostReadLine {
         $cmdexLine = & (Get-Command __cmdex_original_read_line -CommandType Function)
-        [Console]::Out.Write("`e]133;C`a")
+        [Console]::Out.Write("`e]133;C;$cmdexNonce`a")
         return $cmdexLine
     }
 }

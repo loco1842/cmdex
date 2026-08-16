@@ -5,9 +5,15 @@ import (
 	"testing"
 )
 
+const testNonce = "test-nonce"
+
+func newCaptureTestSession() *sessionState {
+	return &sessionState{oscNonce: testNonce}
+}
+
 func TestCaptureScan_BasicCommand(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07hello\x1b]133;D;0\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07hello\x1b]133;D;test-nonce;0\x07"))
 
 	if !ss.lastValid {
 		t.Fatal("expected lastValid=true")
@@ -24,8 +30,8 @@ func TestCaptureScan_BasicCommand(t *testing.T) {
 }
 
 func TestCaptureScan_NonZeroExitCode(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07boom\x1b]133;D;127\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07boom\x1b]133;D;test-nonce;127\x07"))
 
 	if ss.lastExitCode != 127 {
 		t.Errorf("lastExitCode = %d, want 127", ss.lastExitCode)
@@ -36,8 +42,8 @@ func TestCaptureScan_NonZeroExitCode(t *testing.T) {
 }
 
 func TestCaptureScan_STTerminator(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x1b\\hi\x1b]133;D;0\x1b\\"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x1b\\hi\x1b]133;D;test-nonce;0\x1b\\"))
 
 	if !ss.lastValid || ss.lastOutput != "hi" {
 		t.Errorf("lastValid=%v lastOutput=%q, want true/\"hi\"", ss.lastValid, ss.lastOutput)
@@ -45,8 +51,8 @@ func TestCaptureScan_STTerminator(t *testing.T) {
 }
 
 func TestCaptureScan_ANSIInOutputIsStripped(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07\x1b[31mred\x1b[0m\x1b]133;D;1\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07\x1b[31mred\x1b[0m\x1b]133;D;test-nonce;1\x07"))
 
 	if ss.lastOutput != "red" {
 		t.Errorf("lastOutput = %q, want %q", ss.lastOutput, "red")
@@ -57,9 +63,9 @@ func TestCaptureScan_ANSIInOutputIsStripped(t *testing.T) {
 }
 
 func TestCaptureScan_MarkerSplitAcrossCalls(t *testing.T) {
-	full := "\x1b]133;C\x07hello world\x1b]133;D;0\x07"
+	full := "\x1b]133;C;test-nonce\x07hello world\x1b]133;D;test-nonce;0\x07"
 	for split := 1; split < len(full); split++ {
-		ss := &sessionState{}
+		ss := newCaptureTestSession()
 		ss.captureScan([]byte(full[:split]))
 		ss.captureScan([]byte(full[split:]))
 
@@ -73,9 +79,9 @@ func TestCaptureScan_MarkerSplitAcrossCalls(t *testing.T) {
 }
 
 func TestCaptureScan_ContentSplitAcrossCalls(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07hel"))
-	ss.captureScan([]byte("lo\x1b]133;D;0\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07hel"))
+	ss.captureScan([]byte("lo\x1b]133;D;test-nonce;0\x07"))
 
 	if !ss.lastValid || ss.lastOutput != "hello" {
 		t.Errorf("lastValid=%v lastOutput=%q, want true/\"hello\"", ss.lastValid, ss.lastOutput)
@@ -83,9 +89,9 @@ func TestCaptureScan_ContentSplitAcrossCalls(t *testing.T) {
 }
 
 func TestCaptureScan_DWithoutPrecedingCIsIgnored(t *testing.T) {
-	ss := &sessionState{}
+	ss := newCaptureTestSession()
 	// zsh's precmd fires once before any command has run, emitting a bare D.
-	ss.captureScan([]byte("\x1b]133;D;0\x07"))
+	ss.captureScan([]byte("\x1b]133;D;test-nonce;0\x07"))
 
 	if ss.lastValid {
 		t.Error("expected lastValid=false for a D with no preceding C")
@@ -96,9 +102,9 @@ func TestCaptureScan_DWithoutPrecedingCIsIgnored(t *testing.T) {
 }
 
 func TestCaptureScan_SecondCommandOverwritesFirst(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07first\x1b]133;D;0\x07"))
-	ss.captureScan([]byte("\x1b]133;C\x07second\x1b]133;D;2\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07first\x1b]133;D;test-nonce;0\x07"))
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07second\x1b]133;D;test-nonce;2\x07"))
 
 	if ss.lastOutput != "second" || ss.lastExitCode != 2 {
 		t.Errorf("lastOutput=%q lastExitCode=%d, want \"second\"/2", ss.lastOutput, ss.lastExitCode)
@@ -106,9 +112,12 @@ func TestCaptureScan_SecondCommandOverwritesFirst(t *testing.T) {
 }
 
 func TestCaptureScan_OutputBetweenCommandsIsNotCaptured(t *testing.T) {
-	ss := &sessionState{}
+	ss := newCaptureTestSession()
 	// Prompt text/echo between D and the next C must never appear in output.
-	ss.captureScan([]byte("\x1b]133;C\x07first\x1b]133;D;0\x07some-prompt$ \x1b]133;C\x07second\x1b]133;D;0\x07"))
+	ss.captureScan([]byte(
+		"\x1b]133;C;test-nonce\x07first\x1b]133;D;test-nonce;0\x07some-prompt$ " +
+			"\x1b]133;C;test-nonce\x07second\x1b]133;D;test-nonce;0\x07",
+	))
 
 	if ss.lastOutput != "second" {
 		t.Errorf("lastOutput = %q, want %q (prompt chatter leaked in)", ss.lastOutput, "second")
@@ -116,11 +125,11 @@ func TestCaptureScan_OutputBetweenCommandsIsNotCaptured(t *testing.T) {
 }
 
 func TestCaptureScan_OverflowKeepsTailAndTruncates(t *testing.T) {
-	ss := &sessionState{}
+	ss := newCaptureTestSession()
 	big := strings.Repeat("x", maxCaptureBytes+100)
-	ss.captureScan([]byte("\x1b]133;C\x07"))
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07"))
 	ss.captureScan([]byte(big))
-	ss.captureScan([]byte("\x1b]133;D;0\x07"))
+	ss.captureScan([]byte("\x1b]133;D;test-nonce;0\x07"))
 
 	if !ss.lastTruncated {
 		t.Error("expected lastTruncated=true after overflow")
@@ -137,8 +146,8 @@ func TestCaptureScan_OverflowKeepsTailAndTruncates(t *testing.T) {
 // small writes that each push capBuf further past maxCaptureBytes, exercising
 // appendCapture's front-discard on every one of them, not just once.
 func TestCaptureScan_RepeatedOverflowKeepsCorrectTail(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07"))
 
 	const chunk = "0123456789"                   // 10 bytes
 	chunks := (maxCaptureBytes/len(chunk))*2 + 5 // well past the cap, many writes
@@ -147,7 +156,7 @@ func TestCaptureScan_RepeatedOverflowKeepsCorrectTail(t *testing.T) {
 		ss.captureScan([]byte(chunk))
 		want.WriteString(chunk)
 	}
-	ss.captureScan([]byte("\x1b]133;D;0\x07"))
+	ss.captureScan([]byte("\x1b]133;D;test-nonce;0\x07"))
 
 	if !ss.lastTruncated {
 		t.Error("expected lastTruncated=true after repeated overflow")
@@ -161,11 +170,11 @@ func TestCaptureScan_RepeatedOverflowKeepsCorrectTail(t *testing.T) {
 }
 
 func TestCaptureScan_UnrelatedOSCPassesThroughAsContent(t *testing.T) {
-	ss := &sessionState{}
+	ss := newCaptureTestSession()
 	// A window-title OSC 0 sequence appears inside the captured output; it
 	// must be preserved as content (and stripped by stripANSI, same as any
 	// other escape sequence) rather than confusing the marker scanner.
-	ss.captureScan([]byte("\x1b]133;C\x07before\x1b]0;window title\x07after\x1b]133;D;0\x07"))
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07before\x1b]0;window title\x07after\x1b]133;D;test-nonce;0\x07"))
 
 	if ss.lastOutput != "beforeafter" {
 		t.Errorf("lastOutput = %q, want %q", ss.lastOutput, "beforeafter")
@@ -173,9 +182,9 @@ func TestCaptureScan_UnrelatedOSCPassesThroughAsContent(t *testing.T) {
 }
 
 func TestCaptureScan_UnrelatedOSCSplitAcrossCallsDoesNotCorruptNextMarker(t *testing.T) {
-	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07before\x1b]0;win"))
-	ss.captureScan([]byte("dow\x07after\x1b]133;D;0\x07"))
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07before\x1b]0;win"))
+	ss.captureScan([]byte("dow\x07after\x1b]133;D;test-nonce;0\x07"))
 
 	if !ss.lastValid || ss.lastOutput != "beforeafter" {
 		t.Errorf("lastValid=%v lastOutput=%q, want true/\"beforeafter\"", ss.lastValid, ss.lastOutput)
@@ -183,12 +192,12 @@ func TestCaptureScan_UnrelatedOSCSplitAcrossCallsDoesNotCorruptNextMarker(t *tes
 }
 
 func TestCaptureScan_UnterminatedMarkerBeyondCarryLimitGivesUp(t *testing.T) {
-	ss := &sessionState{}
+	ss := newCaptureTestSession()
 	// Simulate a "C" marker whose terminator never arrives — after
 	// maxMarkerCarryBytes worth of params, the scanner must give up rather
 	// than buffering forever, so a later genuine marker is still found.
 	ss.captureScan([]byte("\x1b]133;C" + strings.Repeat("z", maxMarkerCarryBytes+10)))
-	ss.captureScan([]byte("\x1b]133;C\x07hello\x1b]133;D;0\x07"))
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07hello\x1b]133;D;test-nonce;0\x07"))
 
 	if !ss.lastValid || ss.lastOutput != "hello" {
 		t.Errorf(
@@ -199,9 +208,61 @@ func TestCaptureScan_UnterminatedMarkerBeyondCarryLimitGivesUp(t *testing.T) {
 	}
 }
 
-func TestResetCapture_ClearsAllState(t *testing.T) {
+// --- Nonce authentication: a command's own output must never be able to
+// forge a marker (see stripNonce in terminal_capture.go). ---
+
+func TestCaptureScan_WrongNonceIsTreatedAsContentNotMarker(t *testing.T) {
+	ss := newCaptureTestSession()
+	// A command prints what looks exactly like a real "D" marker, but with
+	// the wrong nonce (it can't know the real one) — this must not close
+	// the capture or forge the exit code; the bytes should just be part of
+	// the captured output.
+	ss.captureScan([]byte(
+		"\x1b]133;C;test-nonce\x07real output\x1b]133;D;forged;99\x07more output\x1b]133;D;test-nonce;0\x07",
+	))
+
+	if !ss.lastValid {
+		t.Fatal("expected lastValid=true")
+	}
+	if ss.lastExitCode != 0 {
+		t.Errorf("lastExitCode = %d, want 0 (the forged D must be ignored)", ss.lastExitCode)
+	}
+	want := "real output" + "more output"
+	if ss.lastOutput != want {
+		t.Errorf("lastOutput = %q, want %q (forged marker bytes should be kept as literal content)", ss.lastOutput, want)
+	}
+}
+
+func TestCaptureScan_WrongNonceCIsTreatedAsContentNotReset(t *testing.T) {
+	ss := newCaptureTestSession()
+	// A command prints a forged "C" mid-output; it must not reset the
+	// in-progress capture buffer.
+	ss.captureScan([]byte(
+		"\x1b]133;C;test-nonce\x07before\x1b]133;C;forged\x07after\x1b]133;D;test-nonce;0\x07",
+	))
+
+	if !ss.lastValid {
+		t.Fatal("expected lastValid=true")
+	}
+	if !strings.Contains(ss.lastOutput, "before") {
+		t.Errorf("lastOutput = %q, want it to still contain %q (forged C must not reset the buffer)", ss.lastOutput, "before")
+	}
+}
+
+func TestCaptureScan_EmptyNonceTrustsNoMarkers(t *testing.T) {
+	// A session with no nonce set (e.g. shell integration inactive) must
+	// never treat any marker-shaped bytes as real, even a well-formed one.
 	ss := &sessionState{}
-	ss.captureScan([]byte("\x1b]133;C\x07hello\x1b]133;D;1\x07"))
+	ss.captureScan([]byte("\x1b]133;C;\x07hello\x1b]133;D;;0\x07"))
+
+	if ss.lastValid {
+		t.Error("expected lastValid=false when the session has no nonce")
+	}
+}
+
+func TestResetCapture_ClearsAllState(t *testing.T) {
+	ss := newCaptureTestSession()
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07hello\x1b]133;D;test-nonce;1\x07"))
 	if !ss.lastValid {
 		t.Fatal("setup: expected lastValid=true before reset")
 	}
@@ -233,8 +294,9 @@ func TestGetLastOutput_UnavailableBeforeAnyCommand(t *testing.T) {
 
 func TestGetLastOutput_ReturnsCapturedCommand(t *testing.T) {
 	s := &TerminalService{sessions: map[string]*sessionState{}}
-	ss := &sessionState{id: "s1"}
-	ss.captureScan([]byte("\x1b]133;C\x07output text\x1b]133;D;3\x07"))
+	ss := newCaptureTestSession()
+	ss.id = "s1"
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07output text\x1b]133;D;test-nonce;3\x07"))
 	s.sessions["s1"] = ss
 
 	out, err := s.GetLastOutput("s1")
