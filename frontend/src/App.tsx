@@ -1293,6 +1293,7 @@ function App() {
     const handlePaletteExecute = useCallback(async (cmd: Command) => {
         openTab(cmd);
         const prompts = (await GetVariables(cmd.id)) || [];
+        if (!openTabsRef.current.some((t) => t.id === cmd.id)) return;
         const values: Record<string, string> = {};
         let hasEmpty = false;
         for (const p of prompts) {
@@ -1306,12 +1307,14 @@ function App() {
         // see useSyncedRef.ts) reflects the tab openTab() just activated —
         // otherwise runCommandDirect targets the previously active tab.
         setTimeout(() => {
+            if (!openTabsRef.current.some((t) => t.id === cmd.id)) return;
             if (hasEmpty) {
                 handleFillVariablesByTab(cmd.id, values);
             } else {
                 handleExecute(cmd.id, values);
             }
         }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
     }, [openTab, handleFillVariablesByTab, handleExecute]);
 
     /* eslint-disable react-hooks/refs -- keyboard shortcuts use ref-based handlers (not called during render) */
