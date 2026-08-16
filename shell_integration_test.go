@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -401,6 +403,117 @@ func TestShellIntegration_ZshUserZshenvSeesRealZDOTDIR(t *testing.T) {
 			"user's .zshenv observed %q, want $ZDOTDIR to be the user's real directory (%q) while it sourced",
 			strings.TrimSpace(out.Text), userDir,
 		)
+	}
+}
+
+// TestShellIntegration_ZshUserZshenvRelocatingZDOTDIRIsHonored is the
+// regression test for a bug found in review: a common zsh dotfiles pattern
+// has .zshenv relocate $ZDOTDIR itself to point the rest of the startup
+// chain (.zprofile/.zshrc/.zlogin) at a custom directory — .zshenv is the
+// one file zsh always loads from the default location regardless of
+// $ZDOTDIR, so it's the standard place to do this. Before the fix, Cmdex
+// unconditionally restored $ZDOTDIR to the stale original directory right
+// after sourcing the user's .zshenv, so its own .zshrc went on to source
+// $CMDEX_USER_ZDOTDIR/.zshrc at the ORIGINAL location — never the user's
+// real, relocated one — silently skipping their actual configuration.
+func TestShellIntegration_ZshUserZshenvRelocatingZDOTDIRIsHonored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("/bin/zsh not present on this machine")
+	}
+	t.Setenv("SHELL", "/bin/zsh")
+
+	originalDir := t.TempDir()
+	relocatedDir := t.TempDir()
+	markerFile := filepath.Join(relocatedDir, "relocated-zshrc-loaded")
+
+	zshenv := "export ZDOTDIR=\"" + relocatedDir + "\"\n"
+	if err := os.WriteFile(filepath.Join(originalDir, ".zshenv"), []byte(zshenv), 0o644); err != nil {
+		t.Fatalf("write fake user .zshenv: %v", err)
+	}
+	zshrc := "touch \"" + markerFile + "\"\n"
+	if err := os.WriteFile(filepath.Join(relocatedDir, ".zshrc"), []byte(zshrc), 0o644); err != nil {
+		t.Fatalf("write fake relocated .zshrc: %v", err)
+	}
+	t.Setenv("ZDOTDIR", originalDir)
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	if err := s.Write(id, "cat \""+markerFile+"\" 2>&1; echo done\n"); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	out := waitForLastOutput(t, s, id, 5*time.Second)
+	if !out.Available {
+		t.Fatal("GetLastOutput never became available")
+	}
+	if _, err := os.Stat(markerFile); err != nil {
+		t.Errorf(
+			"relocated .zshrc at %q never ran (marker file missing): %v — Cmdex likely sourced the stale original directory instead of the user's relocated one",
+			relocatedDir, err,
+		)
+	}
+}
+
+// TestShellIntegration_BashPreservesPromptCommandArray is the regression
+// test for a bug found in review: bash 5.1+ runs PROMPT_COMMAND as an array
+// (every element, in order) when it's declared as one — some prompt/timing
+// tools set it up that way. Before the fix, cmdex-bashrc.sh always rebuilt
+// PROMPT_COMMAND as a single string via scalar expansion, which only reads
+// element 0 of an array — every other element (and whatever it did) was
+// silently dropped.
+func TestShellIntegration_BashPreservesPromptCommandArray(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("/bin/bash not present on this machine")
+	}
+
+	// PROMPT_COMMAND-as-array is a bash 5.1+ feature; older bash (e.g.
+	// macOS's system /bin/bash, frozen at 3.2 for licensing reasons) never
+	// runs more than element 0 regardless of what cmdex-bashrc.sh does, so
+	// the bug this test guards against can't be observed there.
+	verOut, err := exec.Command("/bin/bash", "-c", "echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}").Output()
+	if err != nil {
+		t.Fatalf("checking bash version: %v", err)
+	}
+	var major, minor int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(verOut)), "%d.%d", &major, &minor); err != nil {
+		t.Fatalf("parsing bash version %q: %v", verOut, err)
+	}
+	if major < 5 || (major == 5 && minor < 1) {
+		t.Skipf("bash %d.%d predates 5.1's PROMPT_COMMAND array support", major, minor)
+	}
+
+	t.Setenv("SHELL", "/bin/bash")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	marker1 := filepath.Join(home, "hook1-ran")
+	marker2 := filepath.Join(home, "hook2-ran")
+	profile := "PROMPT_COMMAND=('touch \"" + marker1 + "\"' 'touch \"" + marker2 + "\"')\n"
+	if err := os.WriteFile(filepath.Join(home, ".bash_profile"), []byte(profile), 0o644); err != nil {
+		t.Fatalf("write fake .bash_profile: %v", err)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	if err := s.Write(id, "echo hi\n"); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	out := waitForLastOutput(t, s, id, 5*time.Second)
+	if !out.Available {
+		t.Fatal("GetLastOutput never became available — bash integration did not activate")
+	}
+
+	for _, m := range []string{marker1, marker2} {
+		if _, err := os.Stat(m); err != nil {
+			t.Errorf("expected %s to exist (PROMPT_COMMAND array element should have run): %v", m, err)
+		}
 	}
 }
 

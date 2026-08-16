@@ -96,4 +96,22 @@ __cmdex_emit_marker() {
 }
 
 trap '__cmdex_debug_trap' DEBUG
-PROMPT_COMMAND="__cmdex_capture_exit${PROMPT_COMMAND:+$'\n'$PROMPT_COMMAND}"$'\n'"__cmdex_emit_marker"
+
+# bash only started running PROMPT_COMMAND as an array (each element run in
+# order) in 5.1; before that it was always a single string bash evaluated
+# as-is. If we always built the new value as a string here, a profile that
+# had set PROMPT_COMMAND as an array (some prompt/timing tools do) would
+# have every element past the first silently discarded by this scalar
+# expansion — "${PROMPT_COMMAND[@]}" avoids that: bash expands it to every
+# element when PROMPT_COMMAND is an array, or the one value when it's a
+# plain scalar, or nothing when it's unset, so building the replacement as
+# an array preserves whichever shape it already had. This is only safe to
+# do on 5.1+ though — on older bash, assigning an array here would mean only
+# its first element (this bash still has no concept of "run every element")
+# ever runs, silently dropping __cmdex_emit_marker (and the OSC "D" marker
+# with it) every single time.
+if ((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1))); then
+    PROMPT_COMMAND=(__cmdex_capture_exit "${PROMPT_COMMAND[@]}" __cmdex_emit_marker)
+else
+    PROMPT_COMMAND="__cmdex_capture_exit${PROMPT_COMMAND:+$'\n'$PROMPT_COMMAND}"$'\n'"__cmdex_emit_marker"
+fi

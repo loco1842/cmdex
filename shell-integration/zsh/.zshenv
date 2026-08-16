@@ -55,6 +55,20 @@ if [ -n "$CMDEX_USER_ZDOTDIR" ] && [ -r "$CMDEX_USER_ZDOTDIR/.zshenv" ]; then
     __cmdex_zdotdir="$ZDOTDIR"
     ZDOTDIR="$CMDEX_USER_ZDOTDIR"
     source "$CMDEX_USER_ZDOTDIR/.zshenv"
+    # .zshenv is the one startup file zsh always loads from the default
+    # location regardless of $ZDOTDIR, so it's the standard place a zsh
+    # dotfiles setup relocates $ZDOTDIR itself to point the REST of the
+    # chain (.zprofile/.zshrc/.zlogin) at a custom directory. If the user's
+    # .zshenv just did that, $ZDOTDIR no longer equals what we sourced it
+    # from — that new value is their real dotfile directory now, so update
+    # CMDEX_USER_ZDOTDIR to match. Every later use of CMDEX_USER_ZDOTDIR in
+    # this chain (this file's own restore below, .zprofile's and .zshrc's
+    # own sourcing of the user's files) reads it, not $ZDOTDIR directly, so
+    # this is what makes those look in the user's relocated directory
+    # instead of the stale original one.
+    if [ "$ZDOTDIR" != "$CMDEX_USER_ZDOTDIR" ]; then
+        CMDEX_USER_ZDOTDIR="$ZDOTDIR"
+    fi
     ZDOTDIR="$__cmdex_zdotdir"
     unset __cmdex_zdotdir
 fi

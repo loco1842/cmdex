@@ -8,6 +8,12 @@ if [ -n "$CMDEX_USER_ZDOTDIR" ] && [ -r "$CMDEX_USER_ZDOTDIR/.zprofile" ]; then
     __cmdex_zdotdir="$ZDOTDIR"
     ZDOTDIR="$CMDEX_USER_ZDOTDIR"
     source "$CMDEX_USER_ZDOTDIR/.zprofile"
+    # Same relocation propagation as .zshenv: if the user's .zprofile itself
+    # moved $ZDOTDIR, treat that as their real directory from here on so
+    # .zshrc still finds their real files afterward.
+    if [ "$ZDOTDIR" != "$CMDEX_USER_ZDOTDIR" ]; then
+        CMDEX_USER_ZDOTDIR="$ZDOTDIR"
+    fi
     ZDOTDIR="$__cmdex_zdotdir"
     unset __cmdex_zdotdir
 fi
