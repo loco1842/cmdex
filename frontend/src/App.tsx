@@ -1454,7 +1454,15 @@ function App() {
             if (tabs.length > 0) handleSelectTab(tabs[tabs.length - 1].id);
         },
 
-        ...(paletteOpen ? { escape: () => setPaletteOpen(false) } : {}),
+        ...(paletteOpen ? {
+            escape: () => setPaletteOpen(false),
+            // Let CommandPalette's own onKeyDown handle cmd/ctrl+enter while
+            // open — otherwise this global binding's capture-phase listener
+            // (useKeyboardShortcuts) stops propagation before the palette's
+            // input ever sees the event, even though this handler itself
+            // bails out on input focus and does nothing.
+            [`${cmdOrCtrl}+enter`]: undefined,
+        } : {}),
     });
     /* eslint-enable react-hooks/refs */
 

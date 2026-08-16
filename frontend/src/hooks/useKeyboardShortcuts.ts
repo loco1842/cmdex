@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 export { isMac, cmdSymbol, cmdOrCtrl, isCmdOrCtrl, shortcutLabelParts, shortcutLabelString, SHORTCUTS, shortcutLabel } from '@/lib/shortcuts';
 
 type Handler = (e: KeyboardEvent) => void;
-export type ShortcutMap = Record<string, Handler>;
+export type ShortcutMap = Record<string, Handler | undefined>;
 
 function buildKey(e: KeyboardEvent): string {
   const mods: string[] = [];
