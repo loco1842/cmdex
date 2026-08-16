@@ -24,9 +24,19 @@ const ptyEnvExtraCapacity = 5
 // base is rewritten in place by key (never duplicated) so this function is
 // idempotent and safe to call on an os.Environ() that may already define
 // any of these variables.
-func buildPtyEnv(base []string) []string {
-	env := make(map[string]string, len(base)+ptyEnvExtraCapacity)
+//
+// extraEnv (KEY=VALUE entries, same shape as base) is merged in by the same
+// by-key-overwrite rule before TERM/COLORTERM/LANG are applied — currently
+// used to activate OSC 133 shell integration (see shell_integration.go),
+// e.g. zsh's ZDOTDIR override. Pass nil when there's nothing to add.
+func buildPtyEnv(base []string, extraEnv []string) []string {
+	env := make(map[string]string, len(base)+len(extraEnv)+ptyEnvExtraCapacity)
 	for _, kv := range base {
+		if key, value, ok := strings.Cut(kv, "="); ok {
+			env[key] = value
+		}
+	}
+	for _, kv := range extraEnv {
 		if key, value, ok := strings.Cut(kv, "="); ok {
 			env[key] = value
 		}

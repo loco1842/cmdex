@@ -57,7 +57,7 @@ func TestConptyBackend_WriteReadRoundTrip(t *testing.T) {
 	}
 
 	shellPath, shellFlag := detectShell()
-	handle, proc, err := conptyStart(shellPath, shellFlag, "", 24, 80)
+	handle, proc, err := conptyStart(shellPath, shellFlag, "", 24, 80, nil)
 	if err != nil {
 		t.Fatalf("conptyStart failed: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestConptyStart_RejectsInvalidDimensions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			handle, proc, err := conptyStart(shellPath, shellFlag, "", tc.rows, tc.cols)
+			handle, proc, err := conptyStart(shellPath, shellFlag, "", tc.rows, tc.cols, nil)
 			if err == nil {
 				t.Fatalf("conptyStart(rows=%d, cols=%d) succeeded, want error", tc.rows, tc.cols)
 			}
@@ -250,7 +250,7 @@ func TestConptyProcess_ConcurrentWaitReturnsSameResult(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	handle, proc, err := conptyStart(cmdExePath(t), "", "", 24, 80, "/C", "exit 7")
+	handle, proc, err := conptyStart(cmdExePath(t), "", "", 24, 80, nil, "/C", "exit 7")
 	if err != nil {
 		t.Fatalf("conptyStart failed: %v", err)
 	}
@@ -310,7 +310,13 @@ func TestConptyProcess_WaitForSingleObjectFailure(t *testing.T) {
 
 	code2, err2 := p.Wait()
 	if code2 != code || err2 != err {
-		t.Errorf("second Wait() call returned (%d, %v), want the identical cached result (%d, %v)", code2, err2, code, err)
+		t.Errorf(
+			"second Wait() call returned (%d, %v), want the identical cached result (%d, %v)",
+			code2,
+			err2,
+			code,
+			err,
+		)
 	}
 }
 
@@ -335,7 +341,7 @@ func TestConptyProcess_GetExitCodeProcessFailure(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	handle, proc, err := conptyStart(cmdExePath(t), "", "", 24, 80, "/C", "exit 0")
+	handle, proc, err := conptyStart(cmdExePath(t), "", "", 24, 80, nil, "/C", "exit 0")
 	if err != nil {
 		t.Fatalf("conptyStart failed: %v", err)
 	}
@@ -362,7 +368,9 @@ func TestConptyProcess_GetExitCodeProcessFailure(t *testing.T) {
 	p := newConptyProcess(0, syncOnly)
 	code, waitErr := p.Wait()
 	if waitErr == nil {
-		t.Fatal("Wait() with a SYNCHRONIZE-only handle returned a nil error, want the real GetExitCodeProcess access-denied failure")
+		t.Fatal(
+			"Wait() with a SYNCHRONIZE-only handle returned a nil error, want the real GetExitCodeProcess access-denied failure",
+		)
 	}
 	if code != 0 {
 		t.Errorf("exitCode = %d, want 0", code)
@@ -387,7 +395,7 @@ func TestConptyHandle_CloseUnblocksRead(t *testing.T) {
 	}
 
 	shellPath, shellFlag := detectShell()
-	handle, proc, err := conptyStart(shellPath, shellFlag, "", 24, 80)
+	handle, proc, err := conptyStart(shellPath, shellFlag, "", 24, 80, nil)
 	if err != nil {
 		t.Fatalf("conptyStart failed: %v", err)
 	}

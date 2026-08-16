@@ -30,28 +30,28 @@ func splitEnvEntry(kv string) (key, value string, ok bool) {
 }
 
 func TestBuildPtyEnv_ForcesTermWhenAbsent(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"HOME=/Users/mac"}))
+	out := envMap(t, buildPtyEnv([]string{"HOME=/Users/mac"}, nil))
 	if out["TERM"] != "xterm-256color" {
 		t.Errorf("TERM = %q, want xterm-256color", out["TERM"])
 	}
 }
 
 func TestBuildPtyEnv_OverridesExistingTerm(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"TERM=dumb"}))
+	out := envMap(t, buildPtyEnv([]string{"TERM=dumb"}, nil))
 	if out["TERM"] != "xterm-256color" {
 		t.Errorf("TERM = %q, want xterm-256color (dumb should be overridden)", out["TERM"])
 	}
 }
 
 func TestBuildPtyEnv_ForcesColorterm(t *testing.T) {
-	out := envMap(t, buildPtyEnv(nil))
+	out := envMap(t, buildPtyEnv(nil, nil))
 	if out["COLORTERM"] != "truecolor" {
 		t.Errorf("COLORTERM = %q, want truecolor", out["COLORTERM"])
 	}
 }
 
 func TestBuildPtyEnv_DefaultsLocaleWhenAbsent(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"HOME=/Users/mac"}))
+	out := envMap(t, buildPtyEnv([]string{"HOME=/Users/mac"}, nil))
 	if out["LANG"] != "en_US.UTF-8" {
 		t.Errorf("LANG = %q, want en_US.UTF-8", out["LANG"])
 	}
@@ -61,21 +61,24 @@ func TestBuildPtyEnv_DefaultsLocaleWhenAbsent(t *testing.T) {
 }
 
 func TestBuildPtyEnv_DoesNotOverrideExistingLang(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"LANG=fr_FR.UTF-8"}))
+	out := envMap(t, buildPtyEnv([]string{"LANG=fr_FR.UTF-8"}, nil))
 	if out["LANG"] != "fr_FR.UTF-8" {
 		t.Errorf("LANG = %q, want fr_FR.UTF-8 (should not be overridden)", out["LANG"])
 	}
 }
 
 func TestBuildPtyEnv_DoesNotOverrideExistingLcCtype(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"LC_CTYPE=ja_JP.UTF-8"}))
+	out := envMap(t, buildPtyEnv([]string{"LC_CTYPE=ja_JP.UTF-8"}, nil))
 	if out["LC_CTYPE"] != "ja_JP.UTF-8" {
-		t.Errorf("LC_CTYPE = %q, want ja_JP.UTF-8 (should not be overridden even when LANG/LC_ALL are absent)", out["LC_CTYPE"])
+		t.Errorf(
+			"LC_CTYPE = %q, want ja_JP.UTF-8 (should not be overridden even when LANG/LC_ALL are absent)",
+			out["LC_CTYPE"],
+		)
 	}
 }
 
 func TestBuildPtyEnv_DoesNotInjectLangWhenLcAllSet(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"LC_ALL=de_DE.UTF-8"}))
+	out := envMap(t, buildPtyEnv([]string{"LC_ALL=de_DE.UTF-8"}, nil))
 	if _, ok := out["LANG"]; ok {
 		t.Errorf("LANG should not be injected when LC_ALL is already set, got %q", out["LANG"])
 	}
@@ -85,7 +88,7 @@ func TestBuildPtyEnv_DoesNotInjectLangWhenLcAllSet(t *testing.T) {
 }
 
 func TestBuildPtyEnv_StripsStaleDimensions(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"COLUMNS=300", "LINES=99"}))
+	out := envMap(t, buildPtyEnv([]string{"COLUMNS=300", "LINES=99"}, nil))
 	if _, ok := out["COLUMNS"]; ok {
 		t.Error("COLUMNS should be stripped, but is present")
 	}
@@ -95,7 +98,7 @@ func TestBuildPtyEnv_StripsStaleDimensions(t *testing.T) {
 }
 
 func TestBuildPtyEnv_PreservesOtherVars(t *testing.T) {
-	out := envMap(t, buildPtyEnv([]string{"HOME=/Users/mac", "PATH=/usr/bin:/bin", "SHELL=/bin/zsh"}))
+	out := envMap(t, buildPtyEnv([]string{"HOME=/Users/mac", "PATH=/usr/bin:/bin", "SHELL=/bin/zsh"}, nil))
 	if out["HOME"] != "/Users/mac" {
 		t.Errorf("HOME = %q, want /Users/mac", out["HOME"])
 	}
@@ -111,5 +114,5 @@ func TestBuildPtyEnv_NoDuplicateKeys(t *testing.T) {
 	// A base slice with a pre-existing TERM must not result in two TERM=
 	// entries after the override — envMap already fails on duplicates, so
 	// simply exercising it here is the assertion.
-	envMap(t, buildPtyEnv([]string{"TERM=screen", "HOME=/Users/mac", "TERM_PROGRAM=Apple_Terminal"}))
+	envMap(t, buildPtyEnv([]string{"TERM=screen", "HOME=/Users/mac", "TERM_PROGRAM=Apple_Terminal"}, nil))
 }

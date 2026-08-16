@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useSyncedRef } from '../hooks/useSyncedRef';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -168,6 +169,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   const [savedDensity, setSavedDensity] = useState(density);
   const [draftWorkingDir, setDraftWorkingDir] = useState('');
   const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
+  const [shellIntegration, setShellIntegrationState] = useState(true);
 
   // Refs track the latest values so the async GetSettings → merge → SetSettings
   // chain always reads the most recent state, avoiding stale-closure races when
@@ -177,6 +179,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   const draftUiFontRef = useRef(draftUiFont);
   const draftMonoFontRef = useRef(draftMonoFont);
   const draftDensityRef = useRef(draftDensity);
+  const shellIntegrationRef = useRef(shellIntegration);
 
   // Sync refs after every render so async callbacks always read the latest.
   useEffect(() => {
@@ -185,6 +188,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     draftUiFontRef.current = draftUiFont;
     draftMonoFontRef.current = draftMonoFont;
     draftDensityRef.current = draftDensity;
+    shellIntegrationRef.current = shellIntegration;
   });
 
   // Tracks whether the user has edited any draft field. While true, the
@@ -208,6 +212,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         monoFont: draftMonoFontRef.current,
         density: draftDensityRef.current,
         defaultWorkingDir: current?.defaultWorkingDir || {},
+        shellIntegration: shellIntegrationRef.current,
         ...override,
       };
       SetSettings(JSON.stringify(merged)).catch(() => {});
@@ -246,6 +251,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     persistSettings({ locale: v });
   }, [persistSettings, i18n]);
 
+  const changeShellIntegration = useCallback((v: boolean) => {
+    markTouched();
+    setShellIntegrationState(v);
+    persistSettings({ shellIntegration: v });
+  }, [markTouched, persistSettings]);
+
   const changeWorkingDir = useCallback((v: string) => {
     markTouched();
     setDraftWorkingDir(v);
@@ -281,6 +292,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         setDraftMonoFont(s.monoFont || 'JetBrains Mono');
         setSavedDensity(s.density || 'comfortable');
         setDraftDensity(s.density || 'comfortable');
+        setShellIntegrationState(s.shellIntegration ?? true);
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -610,6 +622,20 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             </p>
           </div>
 
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="shell-integration-toggle">{t('settings.shellIntegration')}</Label>
+              <p className="text-[11px] text-muted-foreground">
+                {t('settings.shellIntegrationHint')}
+              </p>
+            </div>
+            <Switch
+              id="shell-integration-toggle"
+              checked={shellIntegration}
+              onCheckedChange={changeShellIntegration}
+            />
+          </div>
+
           {onResetAllData && (
             <div className="border-t border-border pt-4 mt-2">
               <Label className="text-destructive text-xs font-semibold uppercase tracking-wide">{t('settings.dangerZone')}</Label>
@@ -637,6 +663,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                           const wd = getOSPath(s.defaultWorkingDir, currentOS);
                           setDraftWorkingDir(wd);
                           setLocale(s.locale || 'en');
+                          setShellIntegrationState(s.shellIntegration ?? true);
                         }).catch(() => {});
                         userTouchedRef.current = false;
                         setConfirmReset(false);

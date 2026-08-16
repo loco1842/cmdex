@@ -1387,6 +1387,9 @@ func (db *DB) SetSettings(s AppSettings) error {
 	if s.WindowHeight != nil {
 		existing.WindowHeight = s.WindowHeight
 	}
+	if s.ShellIntegration != nil {
+		existing.ShellIntegration = s.ShellIntegration
+	}
 
 	data, err := json.Marshal(existing)
 	if err != nil {

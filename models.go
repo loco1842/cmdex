@@ -160,4 +160,10 @@ type AppSettings struct {
 	WindowY           *int       `json:"windowY,omitempty"`           // settings window Y position
 	WindowWidth       *int       `json:"windowWidth,omitempty"`       // settings window width, min 480
 	WindowHeight      *int       `json:"windowHeight,omitempty"`      // settings window height, min 400
+
+	// ShellIntegration toggles OSC 133 shell-integration markers (see
+	// shell_integration.go), which make "copy last output" exact instead of
+	// scraping the xterm buffer. nil = unset, defaults to enabled; a change
+	// takes effect for sessions started after the change, not existing ones.
+	ShellIntegration *bool `json:"shellIntegration,omitempty"`
 }

@@ -25,8 +25,14 @@ type mockPtyBackend struct{}
 // (wrapped as an execProcess, the same ptyProcess adapter the unix backend
 // uses) running "sleep 0.05" so that monitorExit's Wait() returns promptly
 // (the test does not need a long-lived shell to validate the orchestration
-// path).
-func (mockPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
+// path). opts is accepted (to satisfy ptyBackend) but unused: the mock never
+// spawns shellPath itself, so there is no real shell for shell-integration
+// args/env to apply to.
+func (mockPtyBackend) Start(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	opts shellLaunchOpts,
+) (ptyHandle, ptyProcess, error) {
 	cmd := exec.CommandContext(context.Background(), "sleep", "0.05")
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err

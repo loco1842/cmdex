@@ -77,7 +77,7 @@ import {
     GetVariables,
     RunCommand,
 } from '../bindings/cmdex/executionservice';
-import { CreateSession, ListSessions, CloseSession, RenameSession, SetActiveSession, GetActiveSession } from '../bindings/cmdex/terminalservice';
+import { CreateSession, ListSessions, CloseSession, RenameSession, SetActiveSession, GetActiveSession, GetLastOutput } from '../bindings/cmdex/terminalservice';
 import i18n from './i18n';
 import {
     emptyDraft,
@@ -191,6 +191,24 @@ function App() {
     const expandTerminal = useCallback(() => {
         setTerminalCollapsed(false);
         localStorage.setItem(`${TERM_STORAGE_KEY}-collapsed`, 'false');
+    }, []);
+
+    // Prefer the backend's OSC 133 shell-integration capture — exact, and
+    // immune to terminal-width reflow — falling back to scraping the xterm
+    // buffer only when the session's shell has no integration (or the call
+    // itself fails).
+    const copyLastOutput = useCallback(async (sessionId: string) => {
+        const captured = await GetLastOutput(sessionId).catch(() => null);
+        const ref = terminalRefs.current[sessionId];
+        const output = captured?.available ? captured.text : (ref?.getLastOutput() || '');
+        if (!output) return;
+        try {
+            await copyText(output);
+            toast.success(captured?.truncated ? 'Output copied (truncated)' : 'Output copied');
+        } catch (e) {
+            console.error('Failed to copy:', e);
+            toast.error('Failed to copy');
+        }
     }, []);
 
     // -- Session CRUD callbacks (Task 1) --
@@ -1642,17 +1660,7 @@ function App() {
                                     <button
                                         className="terminal-copy-btn"
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={() => {
-                                            const ref = terminalRefs.current[activeSessionId];
-                                            const output = ref?.getLastOutput() || '';
-                                            if (!output) return;
-                                            copyText(output).then(() => {
-                                                toast.success('Output copied');
-                                            }).catch((e) => {
-                                                console.error('Failed to copy:', e);
-                                                toast.error('Failed to copy');
-                                            });
-                                        }}
+                                        onClick={() => copyLastOutput(activeSessionId)}
                                         aria-label="Copy terminal output"
                                         title="Copy last command output"
                                     >

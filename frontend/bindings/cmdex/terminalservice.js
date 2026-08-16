@@ -56,12 +56,25 @@ export function GetActiveSession() {
 }
 
 /**
+ * GetLastOutput returns the captured output of the most recently completed
+ * command in the given session, as recorded via OSC 133 shell-integration
+ * markers.
+ * @param {string} sessionId
+ * @returns {$CancellablePromise<$models.TerminalLastOutput>}
+ */
+export function GetLastOutput(sessionId) {
+    return $Call.ByID(4011093730, sessionId).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType2($result);
+    }));
+}
+
+/**
  * ListSessions returns SessionInfo for all sessions in the manager.
  * @returns {$CancellablePromise<($models.SessionInfo | null)[]>}
  */
 export function ListSessions() {
     return $Call.ByID(1878753896).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType2($result);
+        return $$createType3($result);
     }));
 }
 
@@ -129,4 +142,5 @@ export function Write(sessionId, data) {
 // Private type creation functions
 const $$createType0 = $models.SessionInfo.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($$createType1);
+const $$createType2 = $models.TerminalLastOutput.createFrom;
+const $$createType3 = $Create.Array($$createType1);

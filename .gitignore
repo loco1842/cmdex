@@ -47,3 +47,8 @@ allure-results/
 # It is a best practice to keep these in a dedicated directory
 .auth/
 playwright/.auth/
+
+# Dev-fixture zsh history that can regenerate under shell-integration/zsh if
+# HISTFILE is ever misdirected there again during local testing — never a
+# shipped asset (see shell-integration/zsh/.zshrc).
+shell-integration/zsh/.zsh_history

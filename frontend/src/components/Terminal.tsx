@@ -102,6 +102,12 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
               for (let i = scanFrom; i >= 0; i--) {
                   const line = buffer.getLine(i);
                   if (!line) continue;
+                  // A wrapped row is a continuation of the row above it, never
+                  // the start of a new prompt — testing it against promptRegex
+                  // misfires on echoed command text that happens to wrap and
+                  // end in a prompt-like character (e.g. a long script line
+                  // ending in "$" or ">" when the terminal is narrow).
+                  if (line.isWrapped) continue;
                   if (promptRegex.test(line.translateToString(true).trim())) {
                       found = i;
                       break;

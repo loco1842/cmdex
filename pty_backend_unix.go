@@ -25,8 +25,12 @@ type creackPtyBackend struct{}
 
 // Start spawns a shell attached to a new PTY, returning an io.ReadWriteCloser
 // handle for the PTY master.
-func (creackPtyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, dir, rows, cols)
+func (creackPtyBackend) Start(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	opts shellLaunchOpts,
+) (ptyHandle, ptyProcess, error) {
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, dir, rows, cols, opts.ExtraEnv, opts.ExtraArgs...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -69,7 +73,15 @@ func (h osFileHandle) Close() error                { return h.f.Close() }
 // because cmd.Dir was never set at all. To preserve it, a failed attempt
 // with cmd.Dir set is retried once with cmd.Dir cleared (inheriting the
 // app's own cwd) before giving up.
-func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
+//
+// extraEnv is merged into the child's environment via buildPtyEnv (see
+// shellLaunchOpts) — pass nil when there's nothing to add.
+func ptyStart(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	extraEnv []string,
+	extraArgs ...string,
+) (*os.File, *exec.Cmd, error) {
 	if rows < 1 || rows > 65535 || cols < 1 || cols > 65535 {
 		return nil, nil, fmt.Errorf("ptyStart: invalid dimensions rows=%d cols=%d (must be 1..65535)", rows, cols)
 	}
@@ -79,7 +91,7 @@ func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...str
 		args = append(args, shellFlag)
 	}
 	args = append(args, extraArgs...)
-	env := buildPtyEnv(os.Environ())
+	env := buildPtyEnv(os.Environ(), extraEnv)
 	winsize := &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
 
 	newCmd := func(dir string) *exec.Cmd {

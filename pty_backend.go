@@ -18,9 +18,21 @@ import (
 // (see golang/go#62708) — so the windows implementation returns its own
 // process handle wrapper instead of an *exec.Cmd.
 type ptyBackend interface {
-	Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error)
+	Start(shellPath, shellFlag, dir string, rows, cols int, opts shellLaunchOpts) (ptyHandle, ptyProcess, error)
 	Resize(handle ptyHandle, cols, rows int) error
 	Kill(proc ptyProcess) error
+}
+
+// shellLaunchOpts carries shell-integration launch tweaks (see
+// shell_integration.go) down to the OS-specific ptyBackend implementations.
+// The zero value means "no integration" — Start behaves exactly as it did
+// before shell integration existed.
+type shellLaunchOpts struct {
+	// ExtraArgs is appended after shellFlag (if shellFlag is non-empty).
+	ExtraArgs []string
+	// ExtraEnv is merged into the child's environment by buildPtyEnv,
+	// alongside (and by the same by-key-overwrite rule as) TERM/COLORTERM/etc.
+	ExtraEnv []string
 }
 
 // ptyHandle is the I/O surface a started PTY exposes to TerminalService.

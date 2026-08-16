@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -173,7 +174,7 @@ func TestTerminalShutdown(t *testing.T) {
 	wantDir := t.TempDir()
 
 	s.Stop(id)
-	ptmx, c, err := ptyStart(shellPath, shellFlag, wantDir, 24, 80, "-c", "sleep 60")
+	ptmx, c, err := ptyStart(shellPath, shellFlag, wantDir, 24, 80, nil, "-c", "sleep 60")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestPtyStart_RejectsInvalidDimensions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ptmx, cmd, err := ptyStart(shellPath, shellFlag, "", tc.rows, tc.cols, "-c", "exit 0")
+			ptmx, cmd, err := ptyStart(shellPath, shellFlag, "", tc.rows, tc.cols, nil, "-c", "exit 0")
 			if err == nil {
 				t.Fatalf("ptyStart(rows=%d, cols=%d) succeeded, want error", tc.rows, tc.cols)
 			}
@@ -262,7 +263,7 @@ func TestTerminalExit(t *testing.T) {
 	wantDir := t.TempDir()
 
 	s.Stop(id)
-	ptmx, cmd, err := ptyStart(shellPath, shellFlag, wantDir, 24, 80, "-c", "exit 0")
+	ptmx, cmd, err := ptyStart(shellPath, shellFlag, wantDir, 24, 80, nil, "-c", "exit 0")
 	if err != nil {
 		t.Fatalf("ptyStart failed: %v", err)
 	}
@@ -888,4 +889,117 @@ func TestTerminalService_CwdInheritance_ExistingSessionUnaffected(t *testing.T) 
 	// Cleanup: clear the global default so subsequent tests start from a
 	// known-empty state.
 	setGlobalDefaultCwd(t, "")
+}
+
+// --- Regression test: resetCapture must not run before the previous
+// session's readLoop goroutine has actually exited (see resetCapture's doc
+// comment in terminal_capture.go) ---
+
+// fakeRestartRaceHandle is a ptyHandle whose Read blocks until Close is
+// called, then delivers a one-time payload before reporting EOF. This
+// mirrors what a real PTY master does when a Read() call is already parked
+// waiting for data at the moment the master is closed: it still returns one
+// last chunk of buffered data before a later Read() observes the closed fd.
+type fakeRestartRaceHandle struct {
+	mu       sync.Mutex
+	closed   bool
+	released chan struct{}
+	payload  []byte
+	sent     bool
+}
+
+func newFakeRestartRaceHandle(payload []byte) *fakeRestartRaceHandle {
+	return &fakeRestartRaceHandle{released: make(chan struct{}), payload: payload}
+}
+
+func (h *fakeRestartRaceHandle) Read(p []byte) (int, error) {
+	<-h.released
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.sent && len(h.payload) > 0 {
+		h.sent = true
+		return copy(p, h.payload), nil
+	}
+	return 0, io.EOF
+}
+
+func (h *fakeRestartRaceHandle) Write(p []byte) (int, error) { return len(p), nil }
+
+func (h *fakeRestartRaceHandle) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.closed {
+		h.closed = true
+		close(h.released)
+	}
+	return nil
+}
+
+// fakeExitedProcess is a ptyProcess that reports itself as already exited
+// with code 0. monitorExit treats exitCode==0 as an intentional stop, so it
+// never auto-restarts and races the test's own manual restart call.
+type fakeExitedProcess struct{}
+
+func (fakeExitedProcess) Pid() int           { return 1 }
+func (fakeExitedProcess) Wait() (int, error) { return 0, nil }
+func (fakeExitedProcess) Exited() bool       { return true }
+
+// restartRaceBackend hands out a fakeRestartRaceHandle carrying a stale OSC
+// 133 "C...D" marker on the session's first Start() call (modeling the
+// session being replaced), and a handle that never produces data on every
+// subsequent call (modeling the freshly restarted session).
+type restartRaceBackend struct {
+	mu           sync.Mutex
+	calls        int
+	stalePayload []byte
+}
+
+func (b *restartRaceBackend) Start(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	opts shellLaunchOpts,
+) (ptyHandle, ptyProcess, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.calls++
+	if b.calls == 1 {
+		return newFakeRestartRaceHandle(b.stalePayload), fakeExitedProcess{}, nil
+	}
+	return newFakeRestartRaceHandle(nil), fakeExitedProcess{}, nil
+}
+
+func (b *restartRaceBackend) Resize(ptyHandle, int, int) error { return nil }
+func (b *restartRaceBackend) Kill(ptyProcess) error            { return nil }
+
+// TestGetLastOutput_UnavailableAfterRestartRace reproduces the race where a
+// session restart's resetCapture() could run before the replaced session's
+// readLoop goroutine had actually exited. The replaced session's readLoop is
+// blocked in Read() (parked on the fake handle's "released" channel) exactly
+// like a real PTY master's blocking Read; it only unblocks — delivering one
+// last stale OSC 133 marker — when releaseOldProcess closes the handle.
+// GetLastOutput must never report that stale marker's output for the new
+// session.
+func TestGetLastOutput_UnavailableAfterRestartRace(t *testing.T) {
+	stale := []byte("\x1b]133;C\x07STALE\x1b]133;D;0\x07")
+	backend := &restartRaceBackend{stalePayload: stale}
+	s := &TerminalService{ptyBackend: backend}
+	s.sessions = make(map[string]*sessionState)
+
+	info, err := s.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	t.Cleanup(func() { s.CloseSession(info.ID) })
+
+	if err := s.Start(info.ID, defaultTerminalCols, defaultTerminalRows); err != nil {
+		t.Fatalf("Start (restart) failed: %v", err)
+	}
+
+	out, err := s.GetLastOutput(info.ID)
+	if err != nil {
+		t.Fatalf("GetLastOutput failed: %v", err)
+	}
+	if out.Available {
+		t.Errorf("GetLastOutput = %+v, want Available=false — stale output from the replaced session leaked into the new one", out)
+	}
 }

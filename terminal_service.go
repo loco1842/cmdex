@@ -93,6 +93,20 @@ type sessionState struct {
 	outputSeq    uint64
 	emitterWg    sync.WaitGroup
 	droppedCount atomic.Uint64
+
+	// Capture state for OSC 133 shell-integration markers — see
+	// terminal_capture.go. Guarded by capMu rather than mu: captureScan runs
+	// on the readLoop goroutine without mu held, and GetLastOutput must not
+	// block on session lifecycle operations.
+	capMu         sync.Mutex
+	capBuf        bytes.Buffer
+	capCarry      []byte
+	capturing     bool
+	capTruncated  bool
+	lastOutput    string
+	lastExitCode  int
+	lastTruncated bool
+	lastValid     bool
 }
 
 // TerminalService manages multiple PTY-backed shell sessions.
@@ -102,6 +116,13 @@ type TerminalService struct {
 	activeSessionID string
 	sessionCounter  int
 	ptyBackend      ptyBackend
+
+	// shellIntegrationDir is where the embedded OSC 133 integration scripts
+	// (shell_integration.go) were materialized at ServiceStartup, or "" if
+	// materialization failed — in which case startSessionLocked skips shell
+	// integration entirely and every session behaves exactly as it did
+	// before shell integration existed.
+	shellIntegrationDir string
 }
 
 // info returns the public SessionInfo for this session. Locks ss.mu: Running
@@ -191,6 +212,17 @@ func (s *TerminalService) ServiceStartup(ctx context.Context, options applicatio
 
 	s.sessions = make(map[string]*sessionState)
 	s.ptyBackend = newPtyBackend()
+
+	if dir, err := setupShellIntegrationDir(); err != nil {
+		// Non-fatal: leaves shellIntegrationDir at its zero value "", so
+		// startSessionLocked just skips shell integration for every
+		// session — GetLastOutput reports Available=false and the frontend
+		// falls back to scraping the xterm buffer, same as before this
+		// feature existed.
+		fmt.Printf("TerminalService: shell integration setup failed (graceful degradation): %v\n", err)
+	} else {
+		s.shellIntegrationDir = dir
+	}
 
 	_, err := s.CreateSession()
 	if err != nil {
@@ -402,9 +434,33 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	// CRITICAL: unlock before blocking operations to prevent deadlock.
 	ss.mu.Unlock()
 
+	// Activate OSC 133 shell integration when possible: integrationFor may
+	// override shellFlag entirely (bash drops its usual -l — see
+	// shell_integration.go) as well as add args/env, so launchFlag/opts,
+	// not shellFlag, are what actually get passed to ptyBackend.Start. This
+	// runs unlocked: shellIntegrationEnabled() takes a blocking DB
+	// round-trip, and nothing here touches session state that needs ss.mu.
+	launchFlag := shellFlag
+	var opts shellLaunchOpts
+	integrated := false
+	if s.shellIntegrationDir != "" && shellIntegrationEnabled() {
+		if flag, sOpts, ok := integrationFor(shellPath, shellFlag, s.shellIntegrationDir); ok {
+			launchFlag = flag
+			opts = sOpts
+			integrated = true
+		}
+	}
+
 	s.releaseOldProcess(ss, oldPtmx, oldProc)
 
-	handle, proc, err := s.ptyBackend.Start(shellPath, shellFlag, ss.workingDir, rows, cols)
+	// Only safe to reset capture state once the previous session's readLoop
+	// goroutine has actually exited (releaseOldProcess just joined it above)
+	// — otherwise a straggling captureScan from the dying goroutine's final
+	// read (or its stopCh leftover flush) can repopulate stale capture state
+	// for the new session right after it was cleared.
+	ss.resetCapture()
+
+	handle, proc, err := s.ptyBackend.Start(shellPath, launchFlag, ss.workingDir, rows, cols, opts)
 
 	ss.mu.Lock()
 	ss.starting = false
@@ -423,7 +479,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 
 	stopCh := ss.stopCh
 	ss.readerWg.Add(1)
-	go ss.readLoop(handle, stopCh)
+	go ss.readLoop(handle, stopCh, integrated)
 	go s.monitorExit(ss, proc, stopCh)
 
 	return nil
@@ -453,8 +509,13 @@ func (s *TerminalService) releaseOldProcess(ss *sessionState, oldPtmx ptyHandle,
 	ss.readerWg.Wait()
 }
 
-// readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to enqueueOutput.
-func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
+// readLoop reads PTY output, handles UTF-8 boundaries, and dispatches to
+// enqueueOutput. captureActive is a per-invocation snapshot (not read live
+// off ss) of whether this session's shell was actually launched with OSC 133
+// integration — sessions on an unrecognized shell, or with the setting
+// disabled, never emit markers, so skipping captureScan entirely avoids
+// taking capMu and scanning every chunk for ESC bytes for no benefit.
+func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}, captureActive bool) {
 	defer ss.readerWg.Done()
 
 	buf := make([]byte, readBufferSize)
@@ -464,6 +525,9 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 		select {
 		case <-stopCh:
 			if len(leftover) > 0 {
+				if captureActive {
+					ss.captureScan(leftover)
+				}
 				ss.enqueueOutput(string(leftover))
 			}
 			return
@@ -473,6 +537,9 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 		n, err := ptmx.Read(buf)
 		if err != nil {
 			if len(leftover) > 0 {
+				if captureActive {
+					ss.captureScan(leftover)
+				}
 				ss.enqueueOutput(string(leftover))
 			}
 			return
@@ -508,6 +575,9 @@ func (ss *sessionState) readLoop(ptmx ptyHandle, stopCh chan struct{}) {
 		}
 
 		if len(data) > 0 {
+			if captureActive {
+				ss.captureScan(data)
+			}
 			ss.enqueueOutput(string(data))
 		}
 	}
@@ -702,6 +772,8 @@ func (s *TerminalService) Clear(sessionId string) error {
 		}
 		b = b[n:]
 	}
+
+	ss.resetCapture()
 
 	if wailsApp != nil {
 		wailsApp.Event.Emit("pty-cleared:"+ss.id, nil)

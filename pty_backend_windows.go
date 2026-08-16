@@ -50,14 +50,24 @@ func newPtyBackend() ptyBackend {
 type conptyBackend struct{}
 
 // Start spawns a shell attached to a new ConPTY.
-func (conptyBackend) Start(shellPath, shellFlag, dir string, rows, cols int) (ptyHandle, ptyProcess, error) {
-	return conptyStart(shellPath, shellFlag, dir, rows, cols)
+func (conptyBackend) Start(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	opts shellLaunchOpts,
+) (ptyHandle, ptyProcess, error) {
+	return conptyStart(shellPath, shellFlag, dir, rows, cols, opts.ExtraEnv, opts.ExtraArgs...)
 }
 
 // conptyStart is the real implementation behind conptyBackend.Start,
 // separated out (mirroring pty_backend_unix.go's ptyStart) so it can take
-// extraArgs for tests.
-func conptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (ptyHandle, ptyProcess, error) {
+// extraArgs for tests. extraEnv is merged into the child's environment via
+// buildPtyEnv — pass nil when there's nothing to add.
+func conptyStart(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	extraEnv []string,
+	extraArgs ...string,
+) (ptyHandle, ptyProcess, error) {
 	if rows < 1 || rows > 65535 || cols < 1 || cols > 65535 {
 		return nil, nil, fmt.Errorf("conptyStart: invalid dimensions rows=%d cols=%d (must be 1..65535)", rows, cols)
 	}
@@ -97,7 +107,7 @@ func conptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...
 		return nil, nil, fmt.Errorf("conpty.New: %w", err)
 	}
 
-	env := buildPtyEnv(os.Environ())
+	env := buildPtyEnv(os.Environ(), extraEnv)
 	spawn := func(wd string) (int, uintptr, error) {
 		return cp.Spawn(resolvedShellPath, argv, &syscall.ProcAttr{Dir: wd, Env: env})
 	}
@@ -323,7 +333,11 @@ func (p *conptyProcess) kill() error {
 	case err := <-done:
 		return err
 	case <-time.After(conptyKillTimeout):
-		return fmt.Errorf("conptyProcess.kill: taskkill(pid=%d) did not return within %s (still running in background)", p.pid, conptyKillTimeout)
+		return fmt.Errorf(
+			"conptyProcess.kill: taskkill(pid=%d) did not return within %s (still running in background)",
+			p.pid,
+			conptyKillTimeout,
+		)
 	}
 }
 
@@ -485,7 +499,10 @@ func (h *conptyHandle) Close() error {
 		select {
 		case err = <-errCh:
 		case <-time.After(conptyCloseTimeout):
-			err = fmt.Errorf("conptyHandle.Close: ClosePseudoConsole did not return within %s (leaked)", conptyCloseTimeout)
+			err = fmt.Errorf(
+				"conptyHandle.Close: ClosePseudoConsole did not return within %s (leaked)",
+				conptyCloseTimeout,
+			)
 			fmt.Println(err.Error())
 		}
 	})
@@ -500,7 +517,12 @@ func (h *conptyHandle) Close() error {
 // handle/process types don't fit *os.File/*exec.Cmd) — the real
 // implementation is conptyStart above, reached via conptyBackend.Start
 // through the ptyBackend interface.
-func ptyStart(shellPath, shellFlag, dir string, rows, cols int, extraArgs ...string) (*os.File, *exec.Cmd, error) {
+func ptyStart(
+	shellPath, shellFlag, dir string,
+	rows, cols int,
+	extraEnv []string,
+	extraArgs ...string,
+) (*os.File, *exec.Cmd, error) {
 	if rows < 1 || rows > 65535 || cols < 1 || cols > 65535 {
 		return nil, nil, fmt.Errorf("ptyStart: invalid dimensions rows=%d cols=%d (must be 1..65535)", rows, cols)
 	}

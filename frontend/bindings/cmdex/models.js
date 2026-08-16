@@ -122,6 +122,17 @@ export class AppSettings {
              */
             this["windowHeight"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * ShellIntegration toggles OSC 133 shell-integration markers (see
+             * shell_integration.go), which make "copy last output" exact instead of
+             * scraping the xterm buffer. nil = unset, defaults to enabled; a change
+             * takes effect for sessions started after the change, not existing ones.
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["shellIntegration"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -531,6 +542,62 @@ export class SessionInfo {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new SessionInfo(/** @type {Partial<SessionInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * TerminalLastOutput is the result of TerminalService.GetLastOutput.
+ */
+export class TerminalLastOutput {
+    /**
+     * Creates a new TerminalLastOutput instance.
+     * @param {Partial<TerminalLastOutput>} [$$source = {}] - The source object to create the TerminalLastOutput.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * Available is false when no command has completed under shell
+             * integration yet (including sessions whose shell has no integration at
+             * all) — Text/ExitCode/Truncated are zero values in that case, and the
+             * frontend should fall back to scraping the xterm buffer.
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("text" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["text"] = "";
+        }
+        if (!("exitCode" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["exitCode"] = 0;
+        }
+        if (!("truncated" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["truncated"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TerminalLastOutput instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {TerminalLastOutput}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TerminalLastOutput(/** @type {Partial<TerminalLastOutput>} */($$parsedSource));
     }
 }
 
