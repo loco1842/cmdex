@@ -357,6 +357,53 @@ func TestShellIntegration_ZshCapturesNonZeroExitCode(t *testing.T) {
 	}
 }
 
+// TestShellIntegration_ZshUserZshenvSeesRealZDOTDIR is the regression test
+// for a bug found in review: .zshenv and .zprofile (unlike .zshrc) sourced
+// the user's own file while $ZDOTDIR still pointed at Cmdex's integration
+// directory, so a user config referencing $ZDOTDIR (e.g. `source
+// "$ZDOTDIR/extra.zsh"`) would silently resolve inside Cmdex's own
+// directory instead of the user's real one. The user's .zshenv here writes
+// out whatever $ZDOTDIR it observed to a file, which a later command reads
+// back through the normal capture path to prove the value it saw.
+func TestShellIntegration_ZshUserZshenvSeesRealZDOTDIR(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("/bin/zsh not present on this machine")
+	}
+	t.Setenv("SHELL", "/bin/zsh")
+
+	userDir := t.TempDir()
+	checkFile := filepath.Join(userDir, "zdotdir-check")
+	zshenv := "if [ \"$ZDOTDIR\" = \"" + userDir + "\" ]; then\n" +
+		"    echo correct > \"" + checkFile + "\"\n" +
+		"else\n" +
+		"    echo \"wrong:$ZDOTDIR\" > \"" + checkFile + "\"\n" +
+		"fi\n"
+	if err := os.WriteFile(filepath.Join(userDir, ".zshenv"), []byte(zshenv), 0o644); err != nil {
+		t.Fatalf("write fake user .zshenv: %v", err)
+	}
+	t.Setenv("ZDOTDIR", userDir)
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	if err := s.Write(id, "cat \""+checkFile+"\"\n"); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	out := waitForLastOutput(t, s, id, 5*time.Second)
+	if !out.Available {
+		t.Fatal("GetLastOutput never became available")
+	}
+	if strings.TrimSpace(out.Text) != "correct" {
+		t.Errorf(
+			"user's .zshenv observed %q, want $ZDOTDIR to be the user's real directory (%q) while it sourced",
+			strings.TrimSpace(out.Text), userDir,
+		)
+	}
+}
+
 // TestShellIntegration_BashCapturesOutputAndExitCode exercises the bash
 // path specifically, since it's the one that needs its login flag (-l)
 // replaced with --rcfile — the exact quirk this integration works around

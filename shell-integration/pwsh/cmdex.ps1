@@ -22,12 +22,21 @@
 # Capture the per-session OSC nonce (see generateOSCNonce in
 # shell_integration.go and stripNonce in terminal_capture.go) into a global
 # variable, then scrub it from the environment — a child process only ever
-# sees exported environment variables, so once removed here, nothing spawned
-# from this shell can read the nonce and use it to forge a "C"/"D" marker in
-# its own output. This runs after $PROFILE (pwsh has no earlier hook to
-# scrub it from), so a command the user's own profile ran before this point
-# could in principle still have seen it — an unavoidable gap given pwsh's
-# lack of a preexec-style hook, but everything from here on is protected.
+# sees exported environment variables, so once removed here, nothing this
+# session ever launches as a separate process — any regular command the
+# user runs — can read the nonce back out of its own environment and use it
+# to forge a "C"/"D" marker in its own output. This runs after $PROFILE
+# (pwsh has no earlier hook to scrub it from), so a command the user's own
+# profile ran before this point could in principle still have seen it — an
+# unavoidable gap given pwsh's lack of a preexec-style hook, but everything
+# launched from here on is protected.
+#
+# This does NOT protect against code that runs IN this session rather than
+# as a separate process — a dot-sourced profile script, another function,
+# Invoke-Expression — since a global variable has no privacy from other code
+# sharing the same session; there's no fix for that at this layer, and it
+# isn't a materially bigger hole regardless (such code could already do far
+# worse than spoof a copy-output marker).
 if (-not (Test-Path Variable:\global:cmdexNonce)) {
     $global:cmdexNonce = $env:CMDEX_OSC_NONCE
     Remove-Item Env:\CMDEX_OSC_NONCE -ErrorAction SilentlyContinue

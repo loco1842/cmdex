@@ -22,10 +22,14 @@ import (
 // xterm buffer (Terminal.tsx's getLastOutput).
 //
 // <nonce> is a random per-session token (sessionState.oscNonce, set from
-// generateOSCNonce in shell_integration.go) that only the shell's own
-// preexec/precmd hooks know — see stripNonce. Without it, a command could
-// print these exact bytes as part of its own output and trick the scanner
-// into treating that as a real boundary.
+// generateOSCNonce in shell_integration.go) that a forked child process of
+// the shell never sees (see stripNonce) — without it, a plain command could
+// print these exact bytes as part of its own stdout/stderr and trick the
+// scanner into treating that as a real boundary. It does NOT stop code that
+// runs in-process in the same shell (a sourced profile/plugin, a shell
+// function) from reading it too, same as our own hooks do — see the nonce
+// comment in each shell-integration script for why that's an inherent,
+// accepted limit rather than a gap this file can close.
 const (
 	// oscCapturePrefix is the fixed portion of the markers this scanner
 	// looks for, shared by both the "C" (output start) and "D" (command

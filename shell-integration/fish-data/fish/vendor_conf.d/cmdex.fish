@@ -17,11 +17,19 @@
 # shell-global (but NOT exported) variable, then scrub it from the
 # environment before the user's own config.fish — or anything it runs — can
 # execute. A child process only ever sees exported environment variables, so
-# once erased here, nothing spawned from this shell can read the nonce and
-# use it to forge a "C"/"D" marker in its own output. `-g` (not `-l`) is
-# required here: fish functions don't close over a sourced file's local
-# variables, only global ones, so $__cmdex_nonce would otherwise be invisible
-# inside __cmdex_preexec/__cmdex_postexec below.
+# once erased here, nothing this shell ever forks and execs — any regular
+# command the user runs — can read the nonce back out of its own
+# environment and use it to forge a "C"/"D" marker in its own output. `-g`
+# (not `-l`) is required here: fish functions don't close over a sourced
+# file's local variables, only global ones, so $__cmdex_nonce would
+# otherwise be invisible inside __cmdex_preexec/__cmdex_postexec below.
+#
+# This does NOT protect against code that runs IN this shell process rather
+# than as a child of it — a sourced config/plugin, another function, `eval`
+# — since a fish-global variable has no privacy from other code sharing the
+# same process; there's no fix for that at this layer, and it isn't a
+# materially bigger hole regardless (such code could already do far worse
+# than spoof a copy-output marker).
 set -g __cmdex_nonce $CMDEX_OSC_NONCE
 set -e CMDEX_OSC_NONCE
 
