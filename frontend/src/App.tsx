@@ -1127,6 +1127,12 @@ function App() {
         if (modal.type !== 'fillVariables' && modal.type !== 'managePresets') return;
         const commandId = modal.commandId;
         if (isNewCommandTabId(commandId)) return;
+        // The modal retains its commandId across tab closes — bail if that
+        // tab is gone rather than executing against a nonexistent tab.
+        if (!openTabsRef.current.some((t) => t.id === commandId)) {
+            setModal({ type: 'none' });
+            return;
+        }
         if (isSavedCommandDraftDirty(commandId)) {
             toast.message(t('toast.saveBeforeExecute'));
             return;
