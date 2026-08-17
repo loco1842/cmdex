@@ -66,8 +66,19 @@ if [ -n "$CMDEX_USER_ZDOTDIR" ] && [ -r "$CMDEX_USER_ZDOTDIR/.zshenv" ]; then
     # own sourcing of the user's files) reads it, not $ZDOTDIR directly, so
     # this is what makes those look in the user's relocated directory
     # instead of the stale original one.
+    #
+    # "${ZDOTDIR:-$HOME}", not "$ZDOTDIR": a .zshenv that UNSETS $ZDOTDIR
+    # (to restore zsh's own default of looking in $HOME, a less common but
+    # equally standard variant of this pattern) would otherwise store an
+    # empty CMDEX_USER_ZDOTDIR — every "-n $CMDEX_USER_ZDOTDIR" guard
+    # downstream (.zprofile's and .zshrc's own sourcing, and .zshrc's final
+    # ZDOTDIR restore) would then see it as unset and skip loading the
+    # user's config entirely. Falling back to $HOME here mirrors zsh's own
+    # documented behavior for an unset ZDOTDIR, and matches how
+    # integrationForZsh in shell_integration.go computed CMDEX_USER_ZDOTDIR
+    # in the first place.
     if [ "$ZDOTDIR" != "$CMDEX_USER_ZDOTDIR" ]; then
-        CMDEX_USER_ZDOTDIR="$ZDOTDIR"
+        CMDEX_USER_ZDOTDIR="${ZDOTDIR:-$HOME}"
     fi
     ZDOTDIR="$__cmdex_zdotdir"
     unset __cmdex_zdotdir

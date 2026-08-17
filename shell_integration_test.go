@@ -457,6 +457,61 @@ func TestShellIntegration_ZshUserZshenvRelocatingZDOTDIRIsHonored(t *testing.T) 
 	}
 }
 
+// TestShellIntegration_ZshUserZshenvUnsettingZDOTDIRFallsBackToHome is the
+// regression test for a bug found in review: the ZDOTDIR-relocation
+// propagation above stored $ZDOTDIR verbatim into CMDEX_USER_ZDOTDIR, so a
+// .zshenv that UNSETS $ZDOTDIR (the standard way to restore zsh's own
+// default of looking in $HOME, the mirror image of relocating it to a new
+// directory) propagated an EMPTY value. Every "-n $CMDEX_USER_ZDOTDIR"
+// guard downstream (.zprofile's and .zshrc's own sourcing of the user's
+// files, and .zshrc's final ZDOTDIR restore) then saw that as unset and
+// skipped loading the user's config entirely, leaving ZDOTDIR pointed at
+// Cmdex's own directory for the rest of the session.
+func TestShellIntegration_ZshUserZshenvUnsettingZDOTDIRFallsBackToHome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("/bin/zsh not present on this machine")
+	}
+	t.Setenv("SHELL", "/bin/zsh")
+
+	// originalDir simulates whatever $ZDOTDIR the user's environment had
+	// before Cmdex launched the shell; home simulates $HOME, deliberately a
+	// DIFFERENT directory, so the test can tell whether .zshrc was sourced
+	// from the real fallback (home) rather than by coincidence.
+	originalDir := t.TempDir()
+	home := t.TempDir()
+	markerFile := filepath.Join(home, "home-zshrc-loaded")
+
+	if err := os.WriteFile(filepath.Join(originalDir, ".zshenv"), []byte("unset ZDOTDIR\n"), 0o644); err != nil {
+		t.Fatalf("write fake user .zshenv: %v", err)
+	}
+	zshrc := "touch \"" + markerFile + "\"\n"
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(zshrc), 0o644); err != nil {
+		t.Fatalf("write fake home .zshrc: %v", err)
+	}
+	t.Setenv("ZDOTDIR", originalDir)
+	t.Setenv("HOME", home)
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	if err := s.Write(id, "cat \""+markerFile+"\" 2>&1; echo done\n"); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	out := waitForLastOutput(t, s, id, 5*time.Second)
+	if !out.Available {
+		t.Fatal("GetLastOutput never became available")
+	}
+	if _, err := os.Stat(markerFile); err != nil {
+		t.Errorf(
+			"$HOME/.zshrc at %q never ran (marker file missing): %v — unsetting $ZDOTDIR in the user's .zshenv likely caused Cmdex to skip the rest of their config",
+			home, err,
+		)
+	}
+}
+
 // TestShellIntegration_BashPreservesPromptCommandArray is the regression
 // test for a bug found in review: bash 5.1+ runs PROMPT_COMMAND as an array
 // (every element, in order) when it's declared as one — some prompt/timing
