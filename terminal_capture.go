@@ -184,9 +184,9 @@ func (ss *sessionState) captureScan(data []byte) {
 // marker's kind byte and its terminator, e.g. ";a1b2;0") begin with
 // ";<nonce>", returning whatever follows — e.g. ";0" for a "D" marker's exit
 // code, or empty for "C". nonce is this session's expected value (see
-// oscNonceEnvVar in shell_integration.go); a session with no nonce (shell
-// integration inactive) never matches, so no marker from an uninstrumented
-// shell is ever trusted.
+// oscNonceFileEnvVar in shell_integration.go); a session with no nonce
+// (shell integration inactive) never matches, so no marker from an
+// uninstrumented shell is ever trusted.
 //
 // This authentication is what makes it safe for captureScan to trust a "C"/
 // "D" marker at all: without it, a command could print the literal bytes

@@ -1000,6 +1000,9 @@ func TestGetLastOutput_UnavailableAfterRestartRace(t *testing.T) {
 		t.Fatalf("GetLastOutput failed: %v", err)
 	}
 	if out.Available {
-		t.Errorf("GetLastOutput = %+v, want Available=false — stale output from the replaced session leaked into the new one", out)
+		t.Errorf(
+			"GetLastOutput = %+v, want Available=false — stale output from the replaced session leaked into the new one",
+			out,
+		)
 	}
 }

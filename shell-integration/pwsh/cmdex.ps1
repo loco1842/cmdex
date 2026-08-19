@@ -19,17 +19,21 @@
 #     and D-only markers still let GetLastOutput ignore stray D's the same
 #     way it does for zsh/bash's own startup-time D-with-no-C case.
 
-# Capture the per-session OSC nonce (see generateOSCNonce in
+# Capture the per-session OSC nonce (see generateOSCNonce/writeNonceFile in
 # shell_integration.go and stripNonce in terminal_capture.go) into a global
-# variable, then scrub it from the environment — a child process only ever
-# sees exported environment variables, so once removed here, nothing this
-# session ever launches as a separate process — any regular command the
-# user runs — can read the nonce back out of its own environment and use it
-# to forge a "C"/"D" marker in its own output. This runs after $PROFILE
-# (pwsh has no earlier hook to scrub it from), so a command the user's own
-# profile ran before this point could in principle still have seen it — an
-# unavoidable gap given pwsh's lack of a preexec-style hook, but everything
-# launched from here on is protected.
+# variable, then delete the file and scrub its path from the environment.
+# The nonce is passed as a file rather than directly as an env var value on
+# purpose: a session removing an env var only edits its own live view of the
+# environment — on platforms where a process's initial environment block
+# stays readable by other means for the process's lifetime regardless of
+# later changes (e.g. /proc/<pid>/environ on Linux, which pwsh also runs on)
+# — a plain command run from here on could otherwise recover the nonce that
+# way and forge a "C"/"D" marker in its own output. Deleting the file
+# (rather than just an env var) closes that route. This runs after $PROFILE
+# (pwsh has no earlier hook to do this from), so a command the user's own
+# profile ran before this point could in principle still have seen the file
+# — an unavoidable gap given pwsh's lack of a preexec-style hook, but
+# everything launched from here on is protected.
 #
 # This does NOT protect against code that runs IN this session rather than
 # as a separate process — a dot-sourced profile script, another function,
@@ -38,8 +42,12 @@
 # isn't a materially bigger hole regardless (such code could already do far
 # worse than spoof a copy-output marker).
 if (-not (Test-Path Variable:\global:cmdexNonce)) {
-    $global:cmdexNonce = $env:CMDEX_OSC_NONCE
-    Remove-Item Env:\CMDEX_OSC_NONCE -ErrorAction SilentlyContinue
+    $cmdexNonceFile = $env:CMDEX_OSC_NONCE_FILE
+    if ($cmdexNonceFile -and (Test-Path $cmdexNonceFile)) {
+        $global:cmdexNonce = Get-Content -Path $cmdexNonceFile -Raw
+        Remove-Item -Path $cmdexNonceFile -ErrorAction SilentlyContinue
+    }
+    Remove-Item Env:\CMDEX_OSC_NONCE_FILE -ErrorAction SilentlyContinue
 }
 
 if (-not (Test-Path Function:\global:__cmdex_original_prompt)) {

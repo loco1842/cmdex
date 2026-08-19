@@ -10,15 +10,20 @@
 # .bash_profile is free to source .bashrc itself, same as on a real login
 # terminal).
 
-# Capture the per-session OSC nonce (see generateOSCNonce in
+# Capture the per-session OSC nonce (see generateOSCNonce/writeNonceFile in
 # shell_integration.go and stripNonce in terminal_capture.go) into a
-# non-exported shell variable, then scrub it from the environment before
-# anything below runs. A child process only ever sees exported environment
-# variables, so once unset here, nothing this shell ever forks and execs —
-# any regular command the user runs — can read the nonce back out of its own
-# environment and use it to forge a "C"/"D" marker in its own output. That's
-# the threat this closes: a program's stdout/stderr containing (by chance or
-# by design) the same bytes our hooks emit.
+# non-exported shell variable, then delete the file and scrub its path from
+# the environment before anything below runs. The nonce is passed as a file
+# rather than directly as an env var value on purpose: a shell `unset`ting an
+# exported variable only edits its own live view of the environment — on
+# Linux it does NOT erase the original environment block the kernel copied
+# into this process's memory at exec() time, and /proc/<pid>/environ keeps
+# exposing that block verbatim (to any same-uid process) for as long as this
+# shell runs, regardless of any unset done here. A plain command run below —
+# `cat /proc/$PPID/environ` — could otherwise recover the nonce that way and
+# forge a "C"/"D" marker in its own output. Deleting the file (rather than
+# just an env var) before anything else runs means no forked child ever gets
+# a chance to read it, by either route.
 #
 # It does NOT protect against code that runs IN this shell process rather
 # than as a child of it — a sourced profile/plugin, a shell function, `eval`
@@ -30,8 +35,11 @@
 # that already runs in-process in the user's shell can do far worse than
 # spoof a copy-output marker — read their history, exfiltrate secrets, run
 # anything as them.
-__cmdex_nonce="$CMDEX_OSC_NONCE"
-unset CMDEX_OSC_NONCE
+if [ -n "$CMDEX_OSC_NONCE_FILE" ] && [ -r "$CMDEX_OSC_NONCE_FILE" ]; then
+    __cmdex_nonce="$(cat "$CMDEX_OSC_NONCE_FILE")"
+    rm -f "$CMDEX_OSC_NONCE_FILE"
+fi
+unset CMDEX_OSC_NONCE_FILE
 
 if [ -r /etc/profile ]; then
     source /etc/profile

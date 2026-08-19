@@ -229,7 +229,11 @@ func TestCaptureScan_WrongNonceIsTreatedAsContentNotMarker(t *testing.T) {
 	}
 	want := "real output" + "more output"
 	if ss.lastOutput != want {
-		t.Errorf("lastOutput = %q, want %q (forged marker bytes should be kept as literal content)", ss.lastOutput, want)
+		t.Errorf(
+			"lastOutput = %q, want %q (forged marker bytes should be kept as literal content)",
+			ss.lastOutput,
+			want,
+		)
 	}
 }
 
@@ -245,7 +249,11 @@ func TestCaptureScan_WrongNonceCIsTreatedAsContentNotReset(t *testing.T) {
 		t.Fatal("expected lastValid=true")
 	}
 	if !strings.Contains(ss.lastOutput, "before") {
-		t.Errorf("lastOutput = %q, want it to still contain %q (forged C must not reset the buffer)", ss.lastOutput, "before")
+		t.Errorf(
+			"lastOutput = %q, want it to still contain %q (forged C must not reset the buffer)",
+			ss.lastOutput,
+			"before",
+		)
 	}
 }
 

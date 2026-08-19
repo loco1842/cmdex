@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -37,8 +38,8 @@ func TestIntegrationFor_Zsh(t *testing.T) {
 	if env["CMDEX_SHELL_INTEGRATION"] != "1" {
 		t.Errorf("CMDEX_SHELL_INTEGRATION = %q, want \"1\"", env["CMDEX_SHELL_INTEGRATION"])
 	}
-	if env["CMDEX_OSC_NONCE"] != "test-nonce" {
-		t.Errorf("CMDEX_OSC_NONCE = %q, want %q", env["CMDEX_OSC_NONCE"], "test-nonce")
+	if env["CMDEX_OSC_NONCE_FILE"] != "test-nonce" {
+		t.Errorf("CMDEX_OSC_NONCE_FILE = %q, want %q", env["CMDEX_OSC_NONCE_FILE"], "test-nonce")
 	}
 }
 
@@ -56,6 +57,54 @@ func TestGenerateOSCNonce_ReturnsUniqueValues(t *testing.T) {
 	}
 	if a == b {
 		t.Error("expected two calls to generateOSCNonce to return different values")
+	}
+}
+
+// TestWriteNonceFile_IsPrivateAndCleansUp guards the fix for a review finding:
+// the nonce must never be reachable through /proc/<pid>/environ (which
+// persists a shell's exec-time environment regardless of a later unset), so
+// it has to travel to the shell as a private file rather than an env var
+// value. This checks the file/dir permissions actually exclude group/other,
+// and that cleanup removes it.
+func TestWriteNonceFile_IsPrivateAndCleansUp(t *testing.T) {
+	path, cleanup, err := writeNonceFile("abc123")
+	if err != nil {
+		t.Fatalf("writeNonceFile failed: %v", err)
+	}
+	defer cleanup()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) failed: %v", path, err)
+	}
+	if string(data) != "abc123" {
+		t.Errorf("file contents = %q, want %q", data, "abc123")
+	}
+
+	// Unix permission bits are meaningless on Windows (os.Stat reports a
+	// fixed mode unrelated to the file's actual ACL there), so this part of
+	// the check only makes sense on POSIX platforms.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat(%q) failed: %v", path, err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("nonce file mode = %v, want no group/other permission bits", perm)
+		}
+
+		dirInfo, err := os.Stat(filepath.Dir(path))
+		if err != nil {
+			t.Fatalf("Stat(dir) failed: %v", err)
+		}
+		if perm := dirInfo.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("nonce dir mode = %v, want no group/other permission bits", perm)
+		}
+	}
+
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected nonce file to be removed after cleanup, stat err = %v", err)
 	}
 }
 
@@ -456,7 +505,8 @@ func TestShellIntegration_ZshUserZshenvRelocatingZDOTDIRIsHonored(t *testing.T) 
 	if _, err := os.Stat(markerFile); err != nil {
 		t.Errorf(
 			"relocated .zshrc at %q never ran (marker file missing): %v — Cmdex likely sourced the stale original directory instead of the user's relocated one",
-			relocatedDir, err,
+			relocatedDir,
+			err,
 		)
 	}
 }
@@ -511,7 +561,8 @@ func TestShellIntegration_ZshUserZshenvUnsettingZDOTDIRFallsBackToHome(t *testin
 	if _, err := os.Stat(markerFile); err != nil {
 		t.Errorf(
 			"$HOME/.zshrc at %q never ran (marker file missing): %v — unsetting $ZDOTDIR in the user's .zshenv likely caused Cmdex to skip the rest of their config",
-			home, err,
+			home,
+			err,
 		)
 	}
 }

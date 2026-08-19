@@ -12,17 +12,24 @@
 # firing once per top-level command (not per pipeline stage), so no extra
 # gating is needed here the way bash's DEBUG-trap-based approach requires.
 
-# Capture the per-session OSC nonce (see generateOSCNonce in
+# Capture the per-session OSC nonce (see generateOSCNonce/writeNonceFile in
 # shell_integration.go and stripNonce in terminal_capture.go) into a
-# shell-global (but NOT exported) variable, then scrub it from the
-# environment before the user's own config.fish — or anything it runs — can
-# execute. A child process only ever sees exported environment variables, so
-# once erased here, nothing this shell ever forks and execs — any regular
-# command the user runs — can read the nonce back out of its own
-# environment and use it to forge a "C"/"D" marker in its own output. `-g`
-# (not `-l`) is required here: fish functions don't close over a sourced
-# file's local variables, only global ones, so $__cmdex_nonce would
-# otherwise be invisible inside __cmdex_preexec/__cmdex_postexec below.
+# shell-global (but NOT exported) variable, then delete the file and scrub
+# its path from the environment before the user's own config.fish — or
+# anything it runs — can execute. The nonce is passed as a file rather than
+# directly as an env var value on purpose: a shell erasing an exported
+# variable only edits its own live view of the environment — on Linux it
+# does NOT erase the original environment block the kernel copied into this
+# process's memory at exec() time, and /proc/<pid>/environ keeps exposing
+# that block verbatim (to any same-uid process) for as long as this shell
+# runs, regardless of any `set -e` done here. A plain command run below —
+# `cat /proc/$PPID/environ` — could otherwise recover the nonce that way and
+# forge a "C"/"D" marker in its own output. Deleting the file (rather than
+# just an env var) before anything else runs means no forked child ever gets
+# a chance to read it, by either route. `-g` (not `-l`) is required for
+# __cmdex_nonce itself: fish functions don't close over a sourced file's
+# local variables, only global ones, so $__cmdex_nonce would otherwise be
+# invisible inside __cmdex_preexec/__cmdex_postexec below.
 #
 # This does NOT protect against code that runs IN this shell process rather
 # than as a child of it — a sourced config/plugin, another function, `eval`
@@ -30,8 +37,11 @@
 # same process; there's no fix for that at this layer, and it isn't a
 # materially bigger hole regardless (such code could already do far worse
 # than spoof a copy-output marker).
-set -g __cmdex_nonce $CMDEX_OSC_NONCE
-set -e CMDEX_OSC_NONCE
+if test -n "$CMDEX_OSC_NONCE_FILE"; and test -r "$CMDEX_OSC_NONCE_FILE"
+    set -g __cmdex_nonce (cat $CMDEX_OSC_NONCE_FILE)
+    rm -f $CMDEX_OSC_NONCE_FILE
+end
+set -e CMDEX_OSC_NONCE_FILE
 
 function __cmdex_preexec --on-event fish_preexec
     printf '\e]133;C;%s\a' "$__cmdex_nonce"

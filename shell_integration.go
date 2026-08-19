@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Shell integration activates OSC 133 semantic-prompt markers ("C" before a
@@ -38,24 +39,69 @@ const shellIntegrationDirName = "shell-integration"
 // $CMDEX_SHELL_INTEGRATION`) can detect that it's active.
 const shellIntegrationEnvFlag = "CMDEX_SHELL_INTEGRATION=1"
 
-// oscNonceEnvVar carries a fresh per-session random token into the shell via
-// its environment, so the integration scripts can embed it in every "C"/"D"
-// marker they emit. Each script reads it into a non-exported shell variable
-// and immediately unsets it (see e.g. shell-integration/bash/cmdex-bashrc.sh)
-// so no process the shell ever spawns can read it back out of its own
-// environment. terminal_capture.go's captureScan only trusts a marker whose
-// params carry this exact value, which is what lets it tell a marker
-// genuinely emitted by the shell's own hooks apart from a command that
-// simply prints the same OSC 133 bytes in its own output — see stripNonce.
-const oscNonceEnvVar = "CMDEX_OSC_NONCE"
+// oscNonceFileEnvVar carries the path to a one-time, mode-0600 file holding
+// the session's fresh per-session random token, so the integration scripts
+// can read it in and embed it in every "C"/"D" marker they emit. Each script
+// reads the file into a non-exported shell variable and immediately deletes
+// it (see e.g. shell-integration/bash/cmdex-bashrc.sh), all before sourcing
+// any user profile or running any command, so no process the shell ever
+// spawns can read the token back out.
+//
+// The token is deliberately NOT passed directly as an env var value (as an
+// earlier version of this file did): a shell `unset`ing an exported variable
+// only edits its own live view of the environment — on Linux it does not
+// erase the original environment block the kernel copied into the process's
+// memory at exec() time, and /proc/<shell-pid>/environ keeps exposing that
+// block verbatim (readable by any same-uid process) for the shell's entire
+// lifetime regardless of any later unsetenv() call. A plain command run in
+// that shell — `cat /proc/$PPID/environ` — could recover the token that way
+// and forge an authenticated marker in its own output, defeating the point
+// of terminal_capture.go's nonce check. A file, read once and deleted before
+// anything else runs, is never placed in that block in the first place.
+const oscNonceFileEnvVar = "CMDEX_OSC_NONCE_FILE"
+
+// nonceFileCleanupGrace is how long writeNonceFile's cleanup func is delayed
+// by startSessionLocked in the normal (successful launch) case. The
+// integration scripts delete the file themselves within milliseconds of
+// shell startup; this is only a fail-safe for the abnormal case (the shell
+// crashes before running its startup files, or isn't one of the shells this
+// app has integration for — see integrationFor's ok=false case) so a stray
+// nonce file doesn't linger on disk indefinitely.
+const nonceFileCleanupGrace = 30 * time.Second
+
+// writeNonceFile writes nonce to a fresh file in a newly created, private
+// temp directory (os.MkdirTemp defaults to 0700; the file itself is written
+// 0600) and returns its path along with a cleanup func that removes the
+// whole directory. The caller must eventually call cleanup exactly once —
+// startSessionLocked does so immediately on a launch error, or after
+// nonceFileCleanupGrace as a fail-safe otherwise — but ordinarily the
+// integration script itself deletes the file (see oscNonceFileEnvVar) long
+// before that fires, leaving cleanup to remove an already-empty directory.
+func writeNonceFile(nonce string) (string, func(), error) {
+	dir, err := os.MkdirTemp("", "cmdex-nonce-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create nonce dir: %w", err)
+	}
+	cleanup := func() {
+		//nolint:gosec // G104: best-effort cleanup, nothing left to do if this fails.
+		os.RemoveAll(dir)
+	}
+
+	path := filepath.Join(dir, "nonce")
+	if err := os.WriteFile(path, []byte(nonce), 0o600); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("write nonce file: %w", err)
+	}
+	return path, cleanup, nil
+}
 
 // oscNonceBytes is the random nonce length generateOSCNonce reads from
 // crypto/rand: 128 bits, far more entropy than a command running inside the
 // session could ever feasibly guess.
 const oscNonceBytes = 16
 
-// generateOSCNonce returns a fresh random token for oscNonceEnvVar, unique to
-// one shell session.
+// generateOSCNonce returns a fresh random token for writeNonceFile, unique
+// to one shell session.
 func generateOSCNonce() (string, error) {
 	b := make([]byte, oscNonceBytes)
 	if _, err := rand.Read(b); err != nil {
@@ -144,7 +190,7 @@ func shellIntegrationEnabled() bool {
 // this app has no integration for, ...), the caller should launch exactly as
 // it would have without shell integration; effectiveFlag/opts are zero
 // values in that case.
-func integrationFor(shellPath, shellFlag, intDir, nonce string) (string, shellLaunchOpts, bool) {
+func integrationFor(shellPath, shellFlag, intDir, nonceFilePath string) (string, shellLaunchOpts, bool) {
 	base := strings.TrimSuffix(strings.ToLower(filepath.Base(shellPath)), ".exe")
 
 	var flag string
@@ -165,7 +211,9 @@ func integrationFor(shellPath, shellFlag, intDir, nonce string) (string, shellLa
 
 	// Every integrated shell needs these; prepending them here once means
 	// the per-shell functions above only supply their shell-specific entries.
-	opts.ExtraEnv = append([]string{shellIntegrationEnvFlag, oscNonceEnvVar + "=" + nonce}, opts.ExtraEnv...)
+	opts.ExtraEnv = append(
+		[]string{shellIntegrationEnvFlag, oscNonceFileEnvVar + "=" + nonceFilePath},
+		opts.ExtraEnv...)
 	return flag, opts, ok
 }
 

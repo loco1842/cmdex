@@ -86,7 +86,7 @@ type sessionState struct {
 	// this session isn't running with shell integration active). Set once
 	// under ss.mu by startSessionLocked before readLoop's goroutine starts,
 	// and read only from that same goroutine (via captureScan) thereafter,
-	// so no further locking is needed — see oscNonceEnvVar in
+	// so no further locking is needed — see oscNonceFileEnvVar in
 	// shell_integration.go and stripNonce in terminal_capture.go.
 	oscNonce        string
 	stopCh          chan struct{}
@@ -451,13 +451,19 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	var opts shellLaunchOpts
 	integrated := false
 	var nonce string
+	var nonceFileCleanup func()
 	if s.shellIntegrationDir != "" && shellIntegrationEnabled() {
 		if n, nErr := generateOSCNonce(); nErr == nil {
-			if flag, sOpts, ok := integrationFor(shellPath, shellFlag, s.shellIntegrationDir, n); ok {
-				launchFlag = flag
-				opts = sOpts
-				integrated = true
-				nonce = n
+			if nonceFile, cleanup, fErr := writeNonceFile(n); fErr == nil {
+				if flag, sOpts, ok := integrationFor(shellPath, shellFlag, s.shellIntegrationDir, nonceFile); ok {
+					launchFlag = flag
+					opts = sOpts
+					integrated = true
+					nonce = n
+					nonceFileCleanup = cleanup
+				} else {
+					cleanup()
+				}
 			}
 		}
 	}
@@ -472,6 +478,19 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.resetCapture()
 
 	handle, proc, err := s.ptyBackend.Start(shellPath, launchFlag, ss.workingDir, rows, cols, opts)
+
+	// The integration script deletes the nonce file itself within
+	// milliseconds of shell startup (see oscNonceFileEnvVar) — this is only
+	// the fail-safe path: immediately on a launch error (nothing will ever
+	// read it), or after a grace period otherwise (the shell crashed before
+	// running its startup files, or some other abnormal case).
+	if nonceFileCleanup != nil {
+		if err != nil {
+			nonceFileCleanup()
+		} else {
+			time.AfterFunc(nonceFileCleanupGrace, nonceFileCleanup)
+		}
+	}
 
 	ss.mu.Lock()
 	ss.starting = false
