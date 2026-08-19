@@ -62,7 +62,11 @@ func TestGenerateOSCNonce_ReturnsUniqueValues(t *testing.T) {
 func TestIntegrationFor_ZshFallsBackToHomeWhenZDOTDIRUnset(t *testing.T) {
 	t.Setenv("ZDOTDIR", "")
 	home := t.TempDir()
+	// os.UserHomeDir() reads $HOME on Unix but %USERPROFILE% on Windows; set
+	// both so this test is meaningful on every CI platform, even though zsh
+	// integration itself only ever runs on Unix.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	_, opts, ok := integrationFor("/bin/zsh", "-l", "/tmp/cmdex-integration", "test-nonce")
 	if !ok {
