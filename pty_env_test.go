@@ -116,3 +116,20 @@ func TestBuildPtyEnv_NoDuplicateKeys(t *testing.T) {
 	// simply exercising it here is the assertion.
 	envMap(t, buildPtyEnv([]string{"TERM=screen", "HOME=/Users/mac", "TERM_PROGRAM=Apple_Terminal"}, nil))
 }
+
+func TestBuildPtyEnv_ExtraEnvOverridesInheritedZDOTDIR(t *testing.T) {
+	// The real-world case this guards: a user with $ZDOTDIR already set in
+	// their environment starts a session, and shell_integration.go's
+	// integrationForZsh supplies its own ZDOTDIR via extraEnv to point zsh
+	// at the integration scripts. extraEnv must win, and — same as
+	// TestBuildPtyEnv_NoDuplicateKeys — envMap fails the test if the
+	// inherited value survives as a second ZDOTDIR= entry instead of being
+	// overwritten.
+	out := envMap(t, buildPtyEnv(
+		[]string{"ZDOTDIR=/Users/someone/.dotfiles/zsh", "HOME=/Users/mac"},
+		[]string{"ZDOTDIR=/tmp/cmdex-integration/zsh"},
+	))
+	if out["ZDOTDIR"] != "/tmp/cmdex-integration/zsh" {
+		t.Errorf("ZDOTDIR = %q, want the extraEnv override %q", out["ZDOTDIR"], "/tmp/cmdex-integration/zsh")
+	}
+}

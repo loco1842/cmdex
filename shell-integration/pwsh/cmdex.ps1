@@ -43,9 +43,9 @@
 # worse than spoof a copy-output marker).
 if (-not (Test-Path Variable:\global:cmdexNonce)) {
     $cmdexNonceFile = $env:CMDEX_OSC_NONCE_FILE
-    if ($cmdexNonceFile -and (Test-Path $cmdexNonceFile)) {
-        $global:cmdexNonce = Get-Content -Path $cmdexNonceFile -Raw
-        Remove-Item -Path $cmdexNonceFile -ErrorAction SilentlyContinue
+    if ($cmdexNonceFile -and (Test-Path -LiteralPath $cmdexNonceFile)) {
+        $global:cmdexNonce = Get-Content -LiteralPath $cmdexNonceFile -Raw
+        Remove-Item -LiteralPath $cmdexNonceFile -ErrorAction SilentlyContinue
     }
     Remove-Item Env:\CMDEX_OSC_NONCE_FILE -ErrorAction SilentlyContinue
 }

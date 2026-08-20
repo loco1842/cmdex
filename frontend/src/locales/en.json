@@ -191,7 +191,10 @@
     "commandSuccess": "Command completed successfully",
     "commandFailed": "Command failed (exit {{code}})",
     "saveBeforeExecute": "Save your changes before running the command.",
-    "maxSessionsReached": "Maximum number of terminal sessions ({{limit}}) reached. Close a session to create a new one."
+    "maxSessionsReached": "Maximum number of terminal sessions ({{limit}}) reached. Close a session to create a new one.",
+    "outputCopied": "Output copied",
+    "outputCopiedTruncated": "Output copied (truncated)",
+    "outputCopyFailed": "Failed to copy"
   },
   "settings": {
     "title": "Settings",

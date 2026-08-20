@@ -285,9 +285,14 @@ func TestMaterializeShellIntegration_IdempotentAcrossCalls(t *testing.T) {
 // --- shellIntegrationEnabled: settings-driven, must default on ---
 
 func TestShellIntegrationEnabled_DefaultsTrueWhenDBNil(t *testing.T) {
-	if db != nil {
-		t.Skip("db is initialized in this test binary run — not exercising the nil-db path")
-	}
+	// Drive the package-level db var directly rather than skipping when
+	// some earlier test in this binary happened to have already
+	// initialized it — that made this test's outcome depend on run order
+	// instead of actually exercising the nil-db path it's named for.
+	original := db
+	db = nil
+	defer func() { db = original }()
+
 	if !shellIntegrationEnabled() {
 		t.Error("expected shellIntegrationEnabled()=true when db is nil")
 	}
@@ -693,11 +698,11 @@ func TestShellIntegration_LongOutputSurvivesNarrowTerminal(t *testing.T) {
 	if !out.Available {
 		t.Fatal("GetLastOutput never became available")
 	}
-	if strings.TrimSpace(out.Text) != longLine {
+	if got := strings.TrimSpace(out.Text); got != longLine {
 		t.Errorf(
-			"Text length = %d, want %d — output corrupted by narrow-terminal wrapping",
-			len(strings.TrimSpace(out.Text)),
-			len(longLine),
+			"Text = %q, want %q — output corrupted by narrow-terminal wrapping",
+			got,
+			longLine,
 		)
 	}
 }

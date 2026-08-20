@@ -204,12 +204,12 @@ function App() {
         if (!output) return;
         try {
             await copyText(output);
-            toast.success(captured?.truncated ? 'Output copied (truncated)' : 'Output copied');
+            toast.success(captured?.truncated ? t('toast.outputCopiedTruncated') : t('toast.outputCopied'));
         } catch (e) {
             console.error('Failed to copy:', e);
-            toast.error('Failed to copy');
+            toast.error(t('toast.outputCopyFailed'));
         }
-    }, []);
+    }, [t]);
 
     // -- Session CRUD callbacks (Task 1) --
 

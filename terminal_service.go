@@ -464,7 +464,11 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 				} else {
 					cleanup()
 				}
+			} else {
+				fmt.Println("Shell integration disabled for this session, could not write OSC nonce file:", fErr)
 			}
+		} else {
+			fmt.Println("Shell integration disabled for this session, could not generate OSC nonce:", nErr)
 		}
 	}
 
