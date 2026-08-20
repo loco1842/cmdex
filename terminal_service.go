@@ -94,6 +94,15 @@ type sessionState struct {
 	starting        bool
 	intentionalStop bool
 	closed          bool
+	// generation counts how many times Stop/CloseSession have invalidated
+	// this session's current PTY lifecycle. startSessionLocked snapshots it
+	// before unlocking ss.mu for the blocking shell-integration setup and
+	// ptyBackend.Start calls, then compares again once relocked: a bump in
+	// between means Stop or CloseSession ran while this start was in
+	// flight, and the PTY it just spawned must be torn down immediately
+	// rather than resurrecting a session the caller already asked to stop
+	// (see startSessionLocked's staleness check).
+	generation uint64
 
 	readerWg     sync.WaitGroup
 	outputCh     chan string
@@ -343,6 +352,12 @@ func (s *TerminalService) CloseSession(id string) error {
 	// Snapshot PTY resources under lock before releasing.
 	ss.mu.Lock()
 	ss.stopSessionLocked()
+	// Invalidates any startSessionLocked call currently unlocked and
+	// mid-flight (shell-integration setup, ptyBackend.Start) for this
+	// session, so it discards whatever PTY it spawns instead of publishing
+	// it into a session we're about to remove — see the generation field's
+	// comment and startSessionLocked's staleness check.
+	ss.generation++
 	oldPtmx := ss.ptmx
 	oldProc := ss.proc
 	ss.ptmx = nil
@@ -417,6 +432,10 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		return nil
 	}
 	ss.starting = true
+	// Snapshotted before unlocking below for the blocking shell-integration
+	// setup and ptyBackend.Start calls — see the staleness check once
+	// relocked, and the generation field's own comment for why this exists.
+	startGen := ss.generation
 
 	// Clamp minimum dimensions.
 	if cols < minTerminalCols {
@@ -483,24 +502,41 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 
 	handle, proc, err := s.ptyBackend.Start(shellPath, launchFlag, ss.workingDir, rows, cols, opts)
 
-	// The integration script deletes the nonce file itself within
-	// milliseconds of shell startup (see oscNonceFileEnvVar) — this is only
-	// the fail-safe path: immediately on a launch error (nothing will ever
-	// read it), or after a grace period otherwise (the shell crashed before
-	// running its startup files, or some other abnormal case).
-	if nonceFileCleanup != nil {
-		if err != nil {
-			nonceFileCleanup()
-		} else {
-			time.AfterFunc(nonceFileCleanupGrace, nonceFileCleanup)
-		}
-	}
-
 	ss.mu.Lock()
 	ss.starting = false
 
-	if err != nil {
+	// Stop or CloseSession bumped ss.generation while we were unlocked
+	// above — the caller already asked to stop this session, so the PTY
+	// ptyBackend.Start just spawned (if it succeeded at all) must be torn
+	// down immediately rather than being published as ss.ptmx/ss.proc:
+	// without this check, it would silently resurrect a session the app no
+	// longer tracks (CloseSession may have already removed it from
+	// s.sessions), leaking a real shell process and its would-be
+	// readLoop/monitorExit goroutines with no way to ever stop them again.
+	if stale := ss.generation != startGen; stale || err != nil {
+		ss.mu.Unlock()
+		if nonceFileCleanup != nil {
+			nonceFileCleanup()
+		}
+		if err == nil {
+			_ = handle.Close()
+			if !proc.Exited() {
+				_ = s.ptyBackend.Kill(proc)
+			}
+		}
+		ss.mu.Lock()
+		if stale {
+			return errors.New("session stopped while starting")
+		}
 		return err
+	}
+
+	// The integration script deletes the nonce file itself within
+	// milliseconds of shell startup (see oscNonceFileEnvVar) — this is only
+	// the fail-safe path, for the shell crashing before running its
+	// startup files or some other abnormal case.
+	if nonceFileCleanup != nil {
+		time.AfterFunc(nonceFileCleanupGrace, nonceFileCleanup)
 	}
 
 	ss.shellPath = shellPath
@@ -848,6 +884,8 @@ func (s *TerminalService) Stop(sessionId string) error {
 	}
 	ss.intentionalStop = true
 	ss.stopSessionLocked()
+	// See CloseSession's identical bump and the generation field's comment.
+	ss.generation++
 
 	oldPtmx := ss.ptmx
 	oldProc := ss.proc

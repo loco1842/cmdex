@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -312,14 +313,21 @@ func newTestTerminalServiceWithShellIntegration(t *testing.T) *TerminalService {
 }
 
 // waitForNextOutput polls GetLastOutput until it reports Available with a
-// result different from baseline, or timeout elapses (returning whatever was
-// last observed either way). Comparing against a baseline — not just
-// checking Available — matters for any test that issues more than one
-// command: immediately after writing a second command, GetLastOutput still
-// reports the FIRST command's (already-Available) result until the shell's
-// own round trip through the real PTY (sourcing profile files, running the
-// command, redrawing the prompt) actually completes and overwrites it: a
-// plain "wait for Available" would race and read stale data.
+// result different from baseline, failing the test if timeout elapses first.
+// Comparing against a baseline — not just checking Available — matters for
+// any test that issues more than one command: immediately after writing a
+// second command, GetLastOutput still reports the FIRST command's
+// (already-Available) result until the shell's own round trip through the
+// real PTY (sourcing profile files, running the command, redrawing the
+// prompt) actually completes and overwrites it: a plain "wait for Available"
+// would race and read stale data.
+//
+// Failing on timeout rather than returning whatever was last observed
+// matters just as much: silently handing back a result that's still equal
+// to baseline would let a real regression — GetLastOutput never advancing
+// past the first command at all — masquerade as success in any test whose
+// assertions happen not to distinguish "the expected next result" from "the
+// old result unexpectedly still sitting there".
 //
 // Pass the zero value TerminalLastOutput{} as baseline for a session's very
 // first command (Available=false makes any real result look "different").
@@ -332,19 +340,18 @@ func waitForNextOutput(
 ) TerminalLastOutput {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var last TerminalLastOutput
 	for time.Now().Before(deadline) {
 		out, err := s.GetLastOutput(sessionID)
 		if err != nil {
 			t.Fatalf("GetLastOutput failed: %v", err)
 		}
-		last = out
 		if out.Available && out != baseline {
 			return out
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return last
+	t.Fatalf("timed out waiting for a new capture to differ from baseline %+v", baseline)
+	panic("unreachable: t.Fatalf halts the goroutine")
 }
 
 // waitForLastOutput is waitForNextOutput for a session's first command,
@@ -735,4 +742,95 @@ func TestShellIntegration_UnintegratedShellReportsUnavailable(t *testing.T) {
 	if out.Available {
 		t.Errorf("expected Available=false for an unintegrated shell, got %+v", out)
 	}
+}
+
+// --- pwsh's cmdex.ps1: exercised directly (no PTY/TerminalService), since
+// pwsh is never auto-detected outside Windows (see detectShell) and this
+// project's own dev machine has no way to drive it through a real PTY ---
+
+// TestPwshIntegration_FailedCmdletDoesNotReuseStaleNativeExitCode is a
+// regression test for a review finding: $LASTEXITCODE is sticky in
+// PowerShell — a non-terminating cmdlet failure (e.g. Get-Item on a missing
+// path) sets $? to $false but never touches $LASTEXITCODE, so without
+// clearing it after every reported command, a later such failure would
+// misreport whatever numeric code the LAST native command happened to leave
+// behind (here, 7) instead of falling back to 1. Runs pwsh itself as the
+// "native command" that produces that code, so this needs no OS-specific
+// helper binary and works wherever pwsh itself is installed.
+func TestPwshIntegration_FailedCmdletDoesNotReuseStaleNativeExitCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	pwshPath, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("pwsh not present on this machine")
+	}
+
+	dir := t.TempDir()
+	if err := materializeShellIntegration(dir); err != nil {
+		t.Fatalf("materializeShellIntegration failed: %v", err)
+	}
+	scriptPath := filepath.Join(dir, "pwsh", "cmdex.ps1")
+
+	const nonce = "regressiontestnonce"
+	nonceFile := filepath.Join(dir, "nonce")
+	if err := os.WriteFile(nonceFile, []byte(nonce), 0o600); err != nil {
+		t.Fatalf("write nonce file: %v", err)
+	}
+
+	// Paths/values are passed in via env vars rather than interpolated into
+	// the script text, so nothing here needs PowerShell string-quoting.
+	const harness = `
+. $env:CMDEX_TEST_SCRIPT
+
+# A real native process (pwsh itself) that exits 7, exactly as if the
+# user's last real command had failed with that code.
+& $env:CMDEX_TEST_SELFPATH -NoProfile -NonInteractive -Command 'exit 7' | Out-Null
+prompt | Out-Null
+
+# A real non-terminating cmdlet failure: sets $? = $false but — unlike a
+# native command — never touches $LASTEXITCODE.
+Get-Item -Path 'cmdex-regression-test-path-does-not-exist' -ErrorAction SilentlyContinue | Out-Null
+
+prompt | Out-Null
+`
+
+	cmd := exec.Command(pwshPath, "-NoProfile", "-NonInteractive", "-Command", harness)
+	cmd.Env = append(os.Environ(),
+		"CMDEX_OSC_NONCE_FILE="+nonceFile,
+		"CMDEX_TEST_SCRIPT="+scriptPath,
+		"CMDEX_TEST_SELFPATH="+pwshPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pwsh harness failed: %v\noutput: %s", err, out)
+	}
+
+	code := lastOSCDMarkerExitCode(t, out, nonce)
+	if code != 1 {
+		t.Errorf("D marker exit code = %d, want 1 (a failed cmdlet must not reuse the stale native exit code 7)", code)
+	}
+}
+
+// lastOSCDMarkerExitCode extracts the exit code from the last "D" marker
+// (see terminal_capture.go's oscCapturePrefix) carrying nonce found in
+// output, failing the test if none is found or it's malformed.
+func lastOSCDMarkerExitCode(t *testing.T, output []byte, nonce string) int {
+	t.Helper()
+	marker := "\x1b]133;D;" + nonce + ";"
+	text := string(output)
+	idx := strings.LastIndex(text, marker)
+	if idx == -1 {
+		t.Fatalf("no OSC 133 D marker with nonce %q found in output: %q", nonce, text)
+	}
+	rest := text[idx+len(marker):]
+	end := strings.IndexAny(rest, "\a\x1b")
+	if end == -1 {
+		t.Fatalf("D marker not terminated in output: %q", text)
+	}
+	code, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		t.Fatalf("could not parse exit code from %q: %v", rest[:end], err)
+	}
+	return code
 }

@@ -44,34 +44,73 @@
 if (-not (Test-Path Variable:\global:cmdexNonce)) {
     $cmdexNonceFile = $env:CMDEX_OSC_NONCE_FILE
     if ($cmdexNonceFile -and (Test-Path -LiteralPath $cmdexNonceFile)) {
-        $global:cmdexNonce = Get-Content -LiteralPath $cmdexNonceFile -Raw
+        # -ErrorAction Stop turns a read failure (permissions, the file
+        # vanishing between the Test-Path above and this read, ...) into a
+        # catchable exception instead of a non-terminating error that would
+        # otherwise print to the user's console on every session start.
+        try {
+            $cmdexNonceValue = Get-Content -LiteralPath $cmdexNonceFile -Raw -ErrorAction Stop
+        } catch {
+            $cmdexNonceValue = $null
+        }
         Remove-Item -LiteralPath $cmdexNonceFile -ErrorAction SilentlyContinue
+
+        # Only install $global:cmdexNonce when the read actually produced a
+        # real value — a null/empty result (the catch above, or an empty
+        # file) must leave it unset rather than defined-but-blank, so the
+        # "do we have a nonce at all" check below correctly skips installing
+        # the marker-emitting wrappers entirely for this session.
+        if ($cmdexNonceValue) {
+            $global:cmdexNonce = $cmdexNonceValue
+        }
     }
     Remove-Item Env:\CMDEX_OSC_NONCE_FILE -ErrorAction SilentlyContinue
 }
 
-if (-not (Test-Path Function:\global:__cmdex_original_prompt)) {
-    Rename-Item Function:\global:prompt Function:\global:__cmdex_original_prompt -ErrorAction SilentlyContinue
+# Without a nonce, terminal_capture.go's stripNonce can never authenticate a
+# marker this session emits (see the nonce comment above) — GetLastOutput
+# would simply stay Available=false forever and the frontend would fall back
+# to scraping the xterm buffer, same as an uninstrumented shell. Skipping the
+# wrapper installation entirely in that case avoids wrapping the user's real
+# prompt/PSConsoleHostReadLine for a feature that can't work this session
+# anyway.
+if (Test-Path Variable:\global:cmdexNonce) {
+    if (-not (Test-Path Function:\global:__cmdex_original_prompt)) {
+        Rename-Item Function:\global:prompt Function:\global:__cmdex_original_prompt -ErrorAction SilentlyContinue
 
-    function global:prompt {
-        # Read *before* anything else runs, so it reflects the command that
-        # just finished rather than something this function itself did.
-        # $? is PowerShell's own pass/fail signal (works for cmdlets and
-        # native commands alike); $LASTEXITCODE is only ever set by native
-        # commands, so it's used as a numeric fallback when $? is false.
-        $cmdexExitCode = if ($?) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
-        [Console]::Out.Write("`e]133;D;$cmdexNonce;$cmdexExitCode`a")
-        & (Get-Command __cmdex_original_prompt -CommandType Function)
+        function global:prompt {
+            # Read *before* anything else runs, so it reflects the command
+            # that just finished rather than something this function itself
+            # did. $? is PowerShell's own pass/fail signal (works for
+            # cmdlets and native commands alike); $LASTEXITCODE is only ever
+            # set by native commands, so it's used as a numeric fallback
+            # when $? is false.
+            $cmdexExitCode = if ($?) { 0 } elseif ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
+
+            # $LASTEXITCODE is sticky: a non-terminating cmdlet failure
+            # (e.g. Get-Item on a missing path) sets $? to $false but never
+            # touches $LASTEXITCODE at all. Without clearing it here, a
+            # later such failure would silently reuse whatever numeric code
+            # the LAST native command happened to leave behind instead of
+            # falling back to 1. Clearing it right after reading it above —
+            # before the next command runs — means it can only read as
+            # non-null again if a native command that actually ran after
+            # this point set it.
+            $global:LASTEXITCODE = $null
+
+            [Console]::Out.Write("`e]133;D;$cmdexNonce;$cmdexExitCode`a")
+            & (Get-Command __cmdex_original_prompt -CommandType Function)
+        }
     }
-}
 
-if ((Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction SilentlyContinue) -and
-    -not (Test-Path Function:\global:__cmdex_original_read_line)) {
-    Rename-Item Function:\global:PSConsoleHostReadLine Function:\global:__cmdex_original_read_line -ErrorAction SilentlyContinue
+    if ((Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction SilentlyContinue) -and
+        -not (Test-Path Function:\global:__cmdex_original_read_line)) {
+        Rename-Item Function:\global:PSConsoleHostReadLine Function:\global:__cmdex_original_read_line -ErrorAction SilentlyContinue
 
-    function global:PSConsoleHostReadLine {
-        $cmdexLine = & (Get-Command __cmdex_original_read_line -CommandType Function)
-        [Console]::Out.Write("`e]133;C;$cmdexNonce`a")
-        return $cmdexLine
+        function global:PSConsoleHostReadLine {
+            $cmdexLine = & (Get-Command __cmdex_original_read_line -CommandType Function)
+            [Console]::Out.Write("`e]133;C;$cmdexNonce`a")
+            return $cmdexLine
+        }
     }
 }
