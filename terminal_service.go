@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -846,7 +845,11 @@ func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
 // binding and no interactive line editor to speak of, so it gets "cls\r"
 // instead — the same as a user typing the command and pressing Enter.
 func clearKeyFor(shellPath string) []byte {
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(shellPath)), ".exe")
+	base := shellPath
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.TrimSuffix(strings.ToLower(base), ".exe")
 	if base == "cmd" {
 		return []byte("cls\r")
 	}
