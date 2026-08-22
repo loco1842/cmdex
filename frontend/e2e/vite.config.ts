@@ -8,8 +8,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, '../src'),
-      '@wailsio/runtime': path.resolve(__dirname, 'mocks/runtime'),
+      '@': path.resolve(import.meta.dirname, '../src'),
+      '@wailsio/runtime': path.resolve(import.meta.dirname, 'mocks/runtime'),
     },
   },
   server: {
