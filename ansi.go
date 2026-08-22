@@ -1,6 +1,97 @@
 package main
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
+
+// removeWrapArtifacts strips the exact byte pattern Windows ConPTY injects
+// when the real console screen buffer auto-wraps a too-long output line at
+// its configured column width: a genuine "\r\n", immediately followed by a
+// CSI cursor-position command ("ESC [ <row> ; <cols> H") that repositions to
+// THAT SAME column. Unlike a Unix pty, where line-wrapping is purely a
+// client-rendering concern that never touches the byte stream, ConPTY can
+// split a single long line mid-character with real CRLF bytes — observed
+// directly by tracing raw PTY output for a long `ConvertTo-Json` value: a
+// word like "occaecati" arrived as "occaeca" + "\r\n" + "\x1b[23;80H" +
+// "ati", i.e. the actual word torn in half around the wrap. Left alone,
+// stripANSI's normal CSI stripping removes the escape but leaves the
+// injected "\r\n" behind as if it were a real line break — turning JSON
+// strings containing any long value into invalid JSON once copied.
+//
+// This is what makes the pattern safe to recognize and remove outright
+// (both the CRLF and the escape, joining the surrounding text back
+// together) rather than treating it as a line break: genuine multi-line
+// content never repositions to the far-right column right after a
+// newline — a real new line always starts at column 1. cols must be the
+// session's actual configured terminal width (the wrapping column ConPTY
+// used); a mismatch (stale size, or 0 when unknown) simply means this pass
+// matches nothing and s passes through unchanged.
+//
+// The character at the wrap boundary itself is also deduplicated: ConPTY's
+// "deferred wrap" handling (a character written at the last column doesn't
+// advance the cursor until the NEXT character arrives, the same delayed-wrap
+// behavior real VT100 terminals use) re-emits that boundary character again
+// after repositioning — "mai" + wrap + "iores" for what should be
+// "maiores", "nobis q" + wrap + "qui" for "nobis qui". Both empirical
+// examples came from the same trace as the split-word case above, and in
+// both the character immediately before the CRLF and immediately after the
+// escape are identical, which is what makes it safe to drop one copy rather
+// than a guess: if they don't match, nothing is dropped, erring toward
+// keeping a real character over risking one that happens to abut the
+// pattern by coincidence.
+func removeWrapArtifacts(s string, cols int) string {
+	if cols <= 0 {
+		return s
+	}
+	colStr := strconv.Itoa(cols)
+
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); {
+		if j, ok := matchWrapArtifact(s, i, colStr); ok {
+			if i > 0 && j < len(s) && s[i-1] == s[j] {
+				j++
+			}
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// matchWrapArtifact reports whether s[i:] begins with "\r\n" + ESC '[' +
+// digits + ';' + colStr + 'H' (see removeWrapArtifacts), returning the index
+// just past the matched span when it does. Guards against colStr matching
+// only a numeric prefix of a longer column parameter (e.g. colStr "8"
+// against an actual "80") by requiring 'H' to immediately follow colStr —
+// any leftover digit before 'H' fails that check and the match is rejected.
+func matchWrapArtifact(s string, i int, colStr string) (int, bool) {
+	prefix := "\r\n" + string(rune(escByte)) + "["
+	if !strings.HasPrefix(s[i:], prefix) {
+		return i, false
+	}
+	j := i + len(prefix)
+	digitsStart := j
+	for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		j++
+	}
+	if j == digitsStart || j >= len(s) || s[j] != ';' {
+		return i, false
+	}
+	j++
+	if !strings.HasPrefix(s[j:], colStr) {
+		return i, false
+	}
+	j += len(colStr)
+	if j >= len(s) || s[j] != 'H' {
+		return i, false
+	}
+	return j + 1, true
+}
 
 // ASCII control bytes and CSI/OSC byte-range bounds this file's escape
 // parsing recognizes (also reused by terminal_capture.go's marker scanner,
@@ -40,7 +131,12 @@ const (
 // redraws down to their final state instead of keeping every intermediate
 // frame. '\r\n' is normalized to '\n' first so real line breaks aren't
 // treated as redraws.
-func stripANSI(s string) string {
+//
+// cols is the session's actual terminal width, used to recognize and elide
+// ConPTY's own line-wrap injection artifacts before any of the above runs —
+// see removeWrapArtifacts.
+func stripANSI(s string, cols int) string {
+	s = removeWrapArtifacts(s, cols)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 
 	var b strings.Builder

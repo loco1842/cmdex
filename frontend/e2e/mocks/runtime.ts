@@ -24,6 +24,43 @@ function uid() {
 
 const now = () => new Date().toISOString();
 
+// ── Terminal ─────────────────────────────────────────────
+// Mirrors the real backend's actual behavior (TerminalService.ServiceStartup
+// and CreateSession both synchronously start the shell before returning) so
+// tests can catch a regression of the bug fixed in Terminal.tsx: every
+// mount used to unconditionally call Start() even when the backend had
+// already started the session, tearing down the healthy PTY and spawning a
+// redundant second shell. See callCounts below.
+let terminalSessions: Array<{
+  id: string;
+  name: string;
+  running: boolean;
+  shellPath: string;
+  workingDir: string;
+}> = [];
+let activeTerminalSessionId: string | null = null;
+let terminalSessionCounter = 0;
+const terminalCallCounts = { CreateSession: 0, Start: 0, Write: 0, Resize: 0, Clear: 0 };
+
+function terminalUid() {
+  terminalSessionCounter++;
+  return `term-${terminalSessionCounter}`;
+}
+
+function createMockTerminalSession() {
+  terminalCallCounts.CreateSession++;
+  const info = {
+    id: terminalUid(),
+    name: `Terminal ${terminalSessionCounter}`,
+    running: true,
+    shellPath: '/bin/mock-shell',
+    workingDir: '/mock/path',
+  };
+  terminalSessions.push(info);
+  if (!activeTerminalSessionId) activeTerminalSessionId = info.id;
+  return info;
+}
+
 const eventListeners: Record<string, Array<(data: any) => void>> = {};
 
 export const Events = {
@@ -340,6 +377,64 @@ const handlers: Record<number, (...args: any[]) => any> = {
   // SaveThemeTemplate
   1489453142: () => {},
 
+  // ── Terminal ─────────────────────────────────────────────
+  // CreateSession
+  2914743863: () => createMockTerminalSession(),
+
+  // ListSessions
+  1878753896: () => terminalSessions,
+
+  // GetActiveSession
+  1716291155: () => terminalSessions.find((s) => s.id === activeTerminalSessionId) || null,
+
+  // SetActiveSession(id)
+  4186280199: (id: string) => {
+    activeTerminalSessionId = id;
+  },
+
+  // CloseSession(id)
+  3305403653: (id: string) => {
+    terminalSessions = terminalSessions.filter((s) => s.id !== id);
+    if (activeTerminalSessionId === id) {
+      activeTerminalSessionId = terminalSessions[0]?.id || null;
+    }
+  },
+
+  // RenameSession(id, name)
+  911254629: (id: string, name: string) => {
+    const s = terminalSessions.find((s) => s.id === id);
+    if (s) s.name = name;
+  },
+
+  // Start(sessionId, cols, rows)
+  3774501399: () => {
+    terminalCallCounts.Start++;
+  },
+
+  // Stop(sessionId)
+  2555571709: (sessionId: string) => {
+    const s = terminalSessions.find((s) => s.id === sessionId);
+    if (s) s.running = false;
+  },
+
+  // Write(sessionId, data)
+  371925220: () => {
+    terminalCallCounts.Write++;
+  },
+
+  // Resize(sessionId, cols, rows)
+  270758441: () => {
+    terminalCallCounts.Resize++;
+  },
+
+  // Clear(sessionId)
+  493646090: () => {
+    terminalCallCounts.Clear++;
+  },
+
+  // GetLastOutput(sessionId)
+  4011093730: () => ({ available: false, text: '', exitCode: 0, truncated: false }),
+
   // ── Events ───────────────────────────────────────────────
   // GetEventNames
   2407475739: () => ({
@@ -393,12 +488,21 @@ export class CancellablePromise<T> extends Promise<T> {
     commands = [];
     Object.keys(presets).forEach((k) => delete presets[k]);
     nextId = 0;
+    terminalSessions = [];
+    activeTerminalSessionId = null;
+    terminalSessionCounter = 0;
+    terminalCallCounts.CreateSession = 0;
+    terminalCallCounts.Start = 0;
+    terminalCallCounts.Write = 0;
+    terminalCallCounts.Resize = 0;
+    terminalCallCounts.Clear = 0;
   },
   seed(data: {
     categories?: any[];
     commands?: any[];
     presets?: Record<string, any[]>;
     settings?: Record<string, any>;
+    terminalSessions?: Array<{ id: string; name: string; running: boolean; shellPath: string; workingDir: string }>;
   }) {
     if (data.categories) categories = data.categories;
     if (data.commands) commands = data.commands;
@@ -406,6 +510,10 @@ export class CancellablePromise<T> extends Promise<T> {
     // Settings are merged, not replaced, so a partial seed keeps the defaults
     // for every field it does not mention — same as the init-script path below.
     if (data.settings) Object.assign(settings, data.settings);
+    if (data.terminalSessions) {
+      terminalSessions = data.terminalSessions;
+      activeTerminalSessionId = data.terminalSessions[0]?.id ?? null;
+    }
     nextId = Math.max(
       ...categories.map((c) => parseInt(c.id) || 0),
       ...commands.map((c) => parseInt(c.id) || 0),
@@ -424,6 +532,10 @@ export class CancellablePromise<T> extends Promise<T> {
   hasListener(eventName: string) {
     return (eventListeners[eventName] || []).length > 0;
   },
+  // Call counters for TerminalService methods — regression coverage for the
+  // "redundant Start() on an already-running session" bug (see
+  // Terminal.tsx's initiallyRunning prop).
+  terminalCallCounts,
 };
 
 // Read seed data injected via addInitScript before app initializes

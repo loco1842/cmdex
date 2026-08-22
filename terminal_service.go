@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -114,6 +116,18 @@ type sessionState struct {
 	// terminal_capture.go. Guarded by capMu rather than mu: captureScan runs
 	// on the readLoop goroutine without mu held, and GetLastOutput must not
 	// block on session lifecycle operations.
+	//
+	// capCols mirrors lastSize.Cols specifically for captureScan's use: it
+	// needs the current terminal width (to recognize ConPTY's line-wrap
+	// injection artifacts — see removeWrapArtifacts in ansi.go) but runs on
+	// the readLoop goroutine without mu held, while Resize/startSessionLocked
+	// update lastSize.Cols under mu. A plain field read here would race;
+	// this must NOT instead be read from captureScan by taking mu, since
+	// Clear/resetCapture already lock mu THEN capMu — captureScan already
+	// holds capMu at that point, and acquiring mu there too would invert
+	// that ordering and risk deadlock. An independent atomic sidesteps both
+	// problems.
+	capCols       atomic.Uint32
 	capMu         sync.Mutex
 	capBuf        bytes.Buffer
 	capCarry      []byte
@@ -543,6 +557,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.shellFlag = shellFlag
 	ss.oscNonce = nonce
 	ss.lastSize = ptyWinsize{Rows: uint16(rows), Cols: uint16(cols)}
+	ss.capCols.Store(uint32(cols))
 	ss.ptmx = handle
 	ss.proc = proc
 	ss.stopCh = make(chan struct{})
@@ -813,10 +828,48 @@ func (s *TerminalService) Resize(sessionId string, cols, rows int) error {
 	}
 
 	ss.lastSize = ptyWinsize{Cols: uint16(cols), Rows: uint16(rows)}
+	ss.capCols.Store(uint32(cols))
 	return s.ptyBackend.Resize(ss.ptmx, cols, rows)
 }
 
-// Clear sends the ANSI clear sequence and emits a namespaced clear event.
+// clearKeyFor returns the bytes Clear should write to the shell's stdin to
+// make IT perform its own screen clear, dispatching on shellPath's basename
+// the same way integrationFor does.
+//
+// Ctrl+L (0x0C) is the portable choice: it's the default "clear screen,
+// redraw the current input line" key binding in PSReadLine (pwsh/powershell)
+// and in bash/zsh/fish's own readline/ZLE/line editor — sent as a single
+// control byte, exactly as if the user had pressed it, so it does not
+// disturb whatever the user has already typed on the current line the way
+// appending a literal "clear\r" command would (that would submit the
+// in-progress line with "clear" tacked onto the end). cmd.exe has no such
+// binding and no interactive line editor to speak of, so it gets "cls\r"
+// instead — the same as a user typing the command and pressing Enter.
+func clearKeyFor(shellPath string) []byte {
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(shellPath)), ".exe")
+	if base == "cmd" {
+		return []byte("cls\r")
+	}
+	return []byte{0x0C}
+}
+
+// Clear makes the shell clear its own screen, the same way it would if the
+// user pressed Ctrl+L (or typed cls/clear and Enter) themselves — see
+// clearKeyFor. This is why letting the shell do it (rather than writing an
+// ANSI clear sequence straight into ss.ptmx, which a previous version did)
+// matters: PSReadLine (and bash/zsh's own line editor) track the real
+// console's cursor position via absolute Win32/terminfo addressing, which a
+// purely client-side xterm.js clear can never see. If only the frontend's
+// buffer is wiped, the shell's next prompt redraw still targets whatever
+// absolute row it last believed the cursor was at, and xterm.js — now
+// otherwise empty — pads up to that row with blank lines to honor the
+// positioning request, which is exactly the "empty line from before"
+// glitch this fixes. Driving the shell's own clear keeps its internal
+// cursor tracking and the frontend's rendered buffer in sync, since both
+// are driven by the same clear-and-redraw the shell performs. The
+// pty-cleared event still fires for an immediate, optimistic frontend wipe;
+// the shell's own (slightly delayed) redraw arriving over the normal
+// output stream is what keeps the two in sync afterward.
 func (s *TerminalService) Clear(sessionId string) error {
 	ss, err := s.resolveSession(sessionId)
 	if err != nil {
@@ -834,8 +887,7 @@ func (s *TerminalService) Clear(sessionId string) error {
 		return errors.New("terminal not started")
 	}
 
-	clearSeq := "\x1b[H\x1b[2J\x1b[3J"
-	b := []byte(clearSeq)
+	b := clearKeyFor(ss.shellPath)
 	for len(b) > 0 {
 		n, err := ss.ptmx.Write(b)
 		if err != nil {

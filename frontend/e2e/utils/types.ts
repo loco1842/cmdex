@@ -3,11 +3,20 @@
 // unnecessary at call sites in addInitScript callbacks (which are serialized
 // to the browser context and cannot close over module-scope helpers).
 
+export interface CmdexE2ETerminalSession {
+    id: string;
+    name: string;
+    running: boolean;
+    shellPath: string;
+    workingDir: string;
+}
+
 export interface CmdexE2ESeed {
     categories?: Array<Record<string, unknown>>;
     commands?: Array<Record<string, unknown>>;
     presets?: Record<string, Array<Record<string, unknown>>>;
     settings?: Record<string, unknown>;
+    terminalSessions?: CmdexE2ETerminalSession[];
 }
 
 declare global {
@@ -20,6 +29,15 @@ declare global {
             seed(data: CmdexE2ESeed): void;
             emit(eventName: string, data: unknown): void;
             hasListener(eventName: string): boolean;
+            // Call counters for TerminalService methods — see
+            // terminal.spec.ts for the regressions these guard against.
+            terminalCallCounts: {
+                CreateSession: number;
+                Start: number;
+                Write: number;
+                Resize: number;
+                Clear: number;
+            };
         };
     }
 }

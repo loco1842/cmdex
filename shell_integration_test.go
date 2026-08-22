@@ -834,3 +834,143 @@ func lastOSCDMarkerExitCode(t *testing.T, output []byte, nonce string) int {
 	}
 	return code
 }
+
+// pwshRealPTYSkipReason returns a non-empty reason to skip a test that
+// needs a REAL pwsh session driven through this app's actual PTY backend
+// (ConPTY), unlike TestPwshIntegration_FailedCmdletDoesNotReuseStaleNativeExitCode
+// above (which only needs pwsh itself on PATH, so LookPath alone is
+// enough). The tests below exercise TerminalService.CreateSession/Start,
+// which always launches whatever detectShell() picks — and detectShell
+// only ever selects pwsh when GOOS is windows. Running on any other OS,
+// even with pwsh installed, would silently start $SHELL (bash/zsh) instead
+// and test the wrong shell entirely.
+func pwshRealPTYSkipReason() string {
+	if runtime.GOOS != "windows" {
+		return "pwsh is only auto-detected as the session shell on Windows (see detectShell) — these tests need a real ConPTY-backed pwsh session, not just pwsh installed"
+	}
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		return "pwsh not present on this machine"
+	}
+	return ""
+}
+
+// TestPwshIntegration_NoPhantomCompletionWhileIdle is a regression test for
+// the "endless Enter" bug: cmdex.ps1 used to capture PSReadLine's real
+// PSConsoleHostReadLine implementation via Rename-Item before overriding
+// it. Renamed away from its literal name, PSReadLine's real ReadLine
+// implementation returned an empty line INSTANTLY instead of blocking for
+// keyboard input, so PowerShell "executed" that empty line over and over —
+// several times a second, forever, entirely on its own with zero real
+// keystrokes involved (confirmed by tracing raw PTY output: a C marker, a
+// bare "\r\n", a D marker, a freshly redrawn prompt, then the same C
+// marker again, repeating). Each phantom cycle completes an (empty)
+// "command" under OSC 133 capture, so if the bug ever returns,
+// GetLastOutput reports a completed command despite this test never
+// writing anything to the session.
+func TestPwshIntegration_NoPhantomCompletionWhileIdle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	// Give the shell time to finish starting and print its first prompt,
+	// then sit idle for a window comfortably longer than the ~150-200ms
+	// cycle time observed when the bug was present.
+	time.Sleep(2 * time.Second)
+
+	out, err := s.GetLastOutput(id)
+	if err != nil {
+		t.Fatalf("GetLastOutput failed: %v", err)
+	}
+	if out.Available {
+		t.Errorf("GetLastOutput reported a completed command with no input ever sent — phantom completion loop reproduced: %+v", out)
+	}
+}
+
+// TestPwshIntegration_ClearDoesNotCorruptNextCommand is a regression test
+// for the Clear-button glitch: an earlier version of Clear() wrote a raw
+// ANSI clear-screen sequence into the PTY's input side (the same path
+// Write() uses for real keystrokes), which PSReadLine partially/incorrectly
+// consumed as keystrokes instead of a screen-clearing directive, leaving a
+// corrupted line in its buffer that surfaced as stray content in whatever
+// command ran next.
+func TestPwshIntegration_ClearDoesNotCorruptNextCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	if err := s.Write(id, "echo first\r"); err != nil {
+		t.Fatalf("Write 1 failed: %v", err)
+	}
+	out1 := waitForLastOutput(t, s, id, 10*time.Second)
+	if strings.TrimSpace(out1.Text) != "first" {
+		t.Fatalf("first command output = %q, want %q", out1.Text, "first")
+	}
+
+	if err := s.Clear(id); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
+	// Give the shell's own Ctrl+L-triggered redraw time to land before the
+	// next command competes with it.
+	time.Sleep(300 * time.Millisecond)
+
+	if err := s.Write(id, "echo second\r"); err != nil {
+		t.Fatalf("Write 2 failed: %v", err)
+	}
+	out2 := waitForNextOutput(t, s, id, 10*time.Second, out1)
+	if strings.TrimSpace(out2.Text) != "second" {
+		t.Errorf("output has stray content after Clear — got %q, want %q", out2.Text, "second")
+	}
+}
+
+// TestPwshIntegration_LongSingleLineOutputSurvivesTerminalWidthWrap is a
+// regression test for the "copy output" JSON-corruption bug: unlike a Unix
+// pty, Windows ConPTY auto-wraps a too-long output line by injecting a
+// REAL CRLF plus a cursor-reposition escape mid-line, splitting a single
+// unbroken line into pieces that look exactly like separate lines once the
+// escape codes are stripped — turning a long JSON string value into
+// invalid JSON once copied. See removeWrapArtifacts in ansi.go.
+func TestPwshIntegration_LongSingleLineOutputSurvivesTerminalWidthWrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	// 300 chars is comfortably more than one row at the session's default
+	// 80-column width (defaultTerminalCols), forcing a wrap partway through
+	// a line the shell never intended to break.
+	want := strings.Repeat("x", 300)
+	if err := s.Write(id, "Write-Host -NoNewline ('"+want+"')\r"); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	out := waitForLastOutput(t, s, id, 10*time.Second)
+
+	// pwsh's own prompt-drawing logic emits one trailing newline to move to
+	// a fresh line before redrawing "PS>" when -NoNewline left the cursor
+	// mid-row — legitimate prompt hygiene, not the bug under test, so it's
+	// trimmed before comparing. What matters is that the 300 x's arrive as
+	// one unbroken run with nothing injected in the middle.
+	got := strings.TrimSuffix(out.Text, "\n")
+	if got != want {
+		t.Errorf(
+			"long single-line output corrupted by terminal-width wrapping: got %d chars, want %d\ngot: %q",
+			len(got), len(want), got,
+		)
+	}
+}

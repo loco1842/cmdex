@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -1004,5 +1005,40 @@ func TestGetLastOutput_UnavailableAfterRestartRace(t *testing.T) {
 			"GetLastOutput = %+v, want Available=false — stale output from the replaced session leaked into the new one",
 			out,
 		)
+	}
+}
+
+// TestClearKeyFor is a regression test for the Clear-button glitch: an
+// earlier version wrote a raw ANSI clear-screen sequence into ss.ptmx (the
+// same write path Write() uses for real keystrokes), which PSReadLine's
+// line editor partially/incorrectly consumed as input instead of a
+// screen-clearing directive, corrupting the next command. clearKeyFor must
+// return Ctrl+L — the portable "clear screen, redraw the current line" key
+// binding PSReadLine, bash, zsh, and fish all install by default — for
+// every shell except cmd.exe, which has no such binding and gets "cls\r"
+// instead (the same as a user typing the command themselves).
+func TestClearKeyFor(t *testing.T) {
+	tests := []struct {
+		name      string
+		shellPath string
+		want      []byte
+	}{
+		{"pwsh unix-style path", "/usr/local/bin/pwsh", []byte{0x0C}},
+		{"pwsh.exe windows path", `C:\Program Files\PowerShell\7\pwsh.exe`, []byte{0x0C}},
+		{"legacy windows powershell.exe", `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, []byte{0x0C}},
+		{"bash", "/bin/bash", []byte{0x0C}},
+		{"zsh", "/bin/zsh", []byte{0x0C}},
+		{"fish", "/usr/bin/fish", []byte{0x0C}},
+		{"cmd.exe", `C:\Windows\System32\cmd.exe`, []byte("cls\r")},
+		{"bare cmd with no extension", "cmd", []byte("cls\r")},
+		{"case-insensitive CMD.EXE", `C:\Windows\System32\CMD.EXE`, []byte("cls\r")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clearKeyFor(tt.shellPath); !bytes.Equal(got, tt.want) {
+				t.Errorf("clearKeyFor(%q) = %q, want %q", tt.shellPath, got, tt.want)
+			}
+		})
 	}
 }

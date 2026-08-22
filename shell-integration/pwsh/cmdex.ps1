@@ -75,8 +75,22 @@ if (-not (Test-Path Variable:\global:cmdexNonce)) {
 # prompt/PSConsoleHostReadLine for a feature that can't work this session
 # anyway.
 if (Test-Path Variable:\global:cmdexNonce) {
-    if (-not (Test-Path Function:\global:__cmdex_original_prompt)) {
-        Rename-Item Function:\global:prompt Function:\global:__cmdex_original_prompt -ErrorAction SilentlyContinue
+    if (-not (Test-Path Variable:\global:__cmdexOriginalPrompt)) {
+        # Capture the ORIGINAL function as a scriptblock reference (same
+        # technique VS Code's own pwsh shell integration uses) rather than
+        # Rename-Item-ing it under a new name. Renaming it turned out to
+        # break PSReadLine's real ReadLine implementation below: invoked
+        # under any name other than the literal "PSConsoleHostReadLine",
+        # it returned an empty line instantly instead of blocking for
+        # keyboard input — every prompt redraw looked like the user had
+        # just pressed Enter on an empty line, producing an endless
+        # self-sustaining "PS>" loop with no real keystrokes involved
+        # (confirmed by tracing raw PTY output: C marker, "\r\n", D marker,
+        # new prompt, repeat — several times a second, forever). Capturing
+        # the scriptblock directly and invoking it via .Invoke() leaves
+        # PSReadLine's real function registered under its original name,
+        # so it keeps behaving normally.
+        $global:__cmdexOriginalPrompt = $function:global:prompt
 
         function global:prompt {
             # Read *before* anything else runs, so it reflects the command
@@ -99,16 +113,18 @@ if (Test-Path Variable:\global:cmdexNonce) {
             $global:LASTEXITCODE = $null
 
             [Console]::Out.Write("`e]133;D;$cmdexNonce;$cmdexExitCode`a")
-            & (Get-Command __cmdex_original_prompt -CommandType Function)
+            $global:__cmdexOriginalPrompt.Invoke()
         }
     }
 
     if ((Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction SilentlyContinue) -and
-        -not (Test-Path Function:\global:__cmdex_original_read_line)) {
-        Rename-Item Function:\global:PSConsoleHostReadLine Function:\global:__cmdex_original_read_line -ErrorAction SilentlyContinue
+        -not (Test-Path Variable:\global:__cmdexOriginalReadLine)) {
+        # See the prompt wrapper's comment above — this is the exact
+        # function whose Rename-Item-based capture broke PSReadLine.
+        $global:__cmdexOriginalReadLine = $function:global:PSConsoleHostReadLine
 
         function global:PSConsoleHostReadLine {
-            $cmdexLine = & (Get-Command __cmdex_original_read_line -CommandType Function)
+            $cmdexLine = $global:__cmdexOriginalReadLine.Invoke()
             [Console]::Out.Write("`e]133;C;$cmdexNonce`a")
             return $cmdexLine
         }

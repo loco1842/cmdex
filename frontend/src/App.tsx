@@ -356,7 +356,20 @@ function App() {
     // Tracks whether event names have been initialized from backend
     const [eventsInitialized, setEventsInitialized] = useState(false);
 
+    // Guards the mount effect below against React StrictMode's deliberate
+    // double-invocation of effects in development: without it, two
+    // concurrent ListSessions()/GetActiveSession() round-trips can each see
+    // "no sessions, no active session" before either one's CreateSession()
+    // call resolves, so both fall through to the "create a default session"
+    // branch — spawning two default terminal sessions (and starting two real
+    // shells) instead of one. Same class of bug, and same fix shape, as
+    // Terminal.tsx's startCalledRef guard on its own mount-time Start() call.
+    const sessionBootstrapRef = useRef(false);
+
     useEffect(() => {
+        if (sessionBootstrapRef.current) return;
+        sessionBootstrapRef.current = true;
+
         initEventNames().then(() => setEventsInitialized(true));
         // Load all sessions and active session on mount
         ListSessions().then((list) => {
@@ -1695,6 +1708,7 @@ function App() {
                                             isVisible={id === activeSessionId && !terminalCollapsed}
                                             theme={theme}
                                             sessionId={id}
+                                            initiallyRunning={session.running}
                                             onShellExit={() => {
                                                 // Mark session as stopped
                                                 setSessions(prev => prev.map(s =>
