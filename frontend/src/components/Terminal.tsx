@@ -41,12 +41,16 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
   const startCalledRef = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const onShellExitRef = useRef(onShellExit);
+  const initiallyRunningRef = useRef(initiallyRunning);
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
   useEffect(() => {
     onShellExitRef.current = onShellExit;
   }, [onShellExit]);
+  useEffect(() => {
+    initiallyRunningRef.current = initiallyRunning;
+  }, [initiallyRunning]);
 
     function hexToRgba(hex: string, alpha: number): string {
         hex = hex.replace('#', '');
@@ -310,7 +314,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
       // again here would tear down that healthy PTY and spawn a redundant
       // second shell, showing up as an extra prompt the moment the terminal
       // tab opens.
-      if (!initiallyRunning) {
+      if (!initiallyRunningRef.current) {
         requestAnimationFrame(() => {
           const current = terminalRef.current;
           if (!current) return;

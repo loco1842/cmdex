@@ -888,7 +888,10 @@ func TestPwshIntegration_NoPhantomCompletionWhileIdle(t *testing.T) {
 		t.Fatalf("GetLastOutput failed: %v", err)
 	}
 	if out.Available {
-		t.Errorf("GetLastOutput reported a completed command with no input ever sent — phantom completion loop reproduced: %+v", out)
+		t.Errorf(
+			"GetLastOutput reported a completed command with no input ever sent — phantom completion loop reproduced: %+v",
+			out,
+		)
 	}
 }
 
