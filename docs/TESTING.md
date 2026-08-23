@@ -68,7 +68,7 @@ Use Go's built-in `testing` package and standard `reflect.DeepEqual` (or `github
 | Module | File | Why test |
 |--------|------|----------|
 | Script parsing | `script.go` | Pure functions (`ExtractTemplateVars`, `ReplaceTemplateVars`, `MergeDetectedVars`, `ParseScriptBody`) are deterministic and easy to unit test. |
-| Executor helpers | `executor.go` | `EvalDefaults` (CEL expression evaluation), `stripShebang`, `shellQuoteDir`. Pure and deterministic. |
+| Executor helpers | `executor.go` | `EvalDefaults` (CEL expression evaluation), `stripShebang`, `shellQuoteDir`, `shellDialectFor`/`buildCommandLine` (per-shell cd prefix + line-submit key, see `TestBuildCommandLine`). Pure and deterministic. |
 | Database layer | `db.go` | CRUD operations, migrations, and FTS search. Use a temporary SQLite file or `:memory:` database in tests. |
 | Service layer | `*_service.go` | Thin wrappers around `db` methods; test input validation and error handling. `execution_service_test.go` covers working-directory resolution and `FinalCmd` construction. |
 | Terminal sessions | `terminal_service.go` | Session lifecycle, concurrency, and the `MaxSessions` limit. Use the mock backend (`pty_backend_mock.go`) to avoid spawning real shells. |
@@ -312,7 +312,7 @@ ok      cmdex   0.234s
 
 All tests live in the root package (`db_test.go`, `execution_service_test.go`, `terminal_service_test.go` and its race/stress/max-sessions variants, `pty_backend_*_test.go`, `terminal_capture_test.go`, `ansi_test.go`, `shell_integration_test.go`, `pty_env_test.go`). The `migrations/` package has no test files of its own — migrations are covered indirectly by `db_test.go`.
 
-Some tests are build-tagged or skipped by platform: the stress and max-sessions variants are `//go:build darwin` and use the mock PTY backend, while `TestTerminalShutdown`/`TestTerminalExit` and `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` are Windows-skipped because they assume Unix shell syntax and POSIX quoting.
+Some tests are build-tagged or skipped by platform: the stress and max-sessions variants are `//go:build darwin` and use the mock PTY backend, while `TestTerminalShutdown`/`TestTerminalExit` are Windows-skipped because they call the raw `ptyStart` helper with Unix shell syntax. `TestBuildCommandLine` (`execution_service_test.go`) is platform-independent and covers POSIX/cmd.exe/PowerShell command-line construction on every OS; `shell_integration_test.go`'s `TestPwshIntegration_*` suite includes Windows-only ConPTY execution tests (`BuiltCommandLineActuallyExecutes`, `LFAloneDoesNotSubmitCommandLine`, `WorkingDirPrefixChangesDirectory`, `WorkingDirPrefixShortCircuitsOnBadDir`) gated on `pwshRealPTYSkipReason` rather than a build tag.
 
 `make test` runs `go test ./...` followed by the frontend Playwright e2e suite (`cd frontend && pnpm test:e2e`); there is no `task test` target in `Taskfile.yml`.
 

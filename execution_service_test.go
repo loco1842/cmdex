@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,14 +84,13 @@ func testWithTerminalSvc(t *testing.T) func() {
 }
 
 func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping: shellQuoteDir (executor.go) always uses POSIX single-quote " +
-			"escaping for the cd prefix, which cmd.exe/PowerShell don't understand — a " +
-			"pre-existing cross-platform gap in command construction, not a PTY backend issue")
-	}
 	defer testWithTerminalSvc(t)()
 
-	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
+	dir := "/Users/test"
+	if runtime.GOOS == "windows" {
+		dir = `C:\Users\test`
+	}
+	workingDirJSON := `{"` + runtime.GOOS + `":` + strconv.Quote(dir) + `}`
 	_, cleanup := testDBCreateCommand(
 		t,
 		"test-cat-wd-18",
@@ -109,9 +109,30 @@ func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
 		t.Errorf("Error = %q, want empty", record.Error)
 	}
 
-	want := "cd '/Users/test' && echo hello\n"
-	if record.FinalCmd != want {
-		t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
+	if runtime.GOOS != "windows" {
+		want := "cd '/Users/test' && echo hello\n"
+		if record.FinalCmd != want {
+			t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
+		}
+		return
+	}
+
+	// On Windows the exact shell (pwsh/powershell/cmd) depends on what's
+	// installed on the runner, so assert the byte-exact shape via
+	// TestBuildCommandLine and check the wiring structurally here: a single
+	// CR-terminated line, no LF, containing both the working dir and the
+	// script.
+	if !strings.HasSuffix(record.FinalCmd, "\r") {
+		t.Errorf("FinalCmd = %q, want it to end with \\r", record.FinalCmd)
+	}
+	if strings.Contains(record.FinalCmd, "\n") {
+		t.Errorf("FinalCmd = %q, want no \\n on Windows", record.FinalCmd)
+	}
+	if !strings.Contains(record.FinalCmd, dir) {
+		t.Errorf("FinalCmd = %q, want it to contain %q", record.FinalCmd, dir)
+	}
+	if !strings.Contains(record.FinalCmd, "echo hello") {
+		t.Errorf("FinalCmd = %q, want it to contain %q", record.FinalCmd, "echo hello")
 	}
 }
 
@@ -149,20 +170,22 @@ func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 	}
 
 	want := "echo hello\n"
+	if runtime.GOOS == "windows" {
+		want = "echo hello\r"
+	}
 	if record.FinalCmd != want {
 		t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
 	}
 }
 
 func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping: shellQuoteDir (executor.go) always uses POSIX single-quote " +
-			"escaping for the cd prefix, which cmd.exe/PowerShell don't understand — a " +
-			"pre-existing cross-platform gap in command construction, not a PTY backend issue")
-	}
 	defer testWithTerminalSvc(t)()
 
-	workingDirJSON := `{"` + runtime.GOOS + `":"/Users/test"}`
+	dir := "/Users/test"
+	if runtime.GOOS == "windows" {
+		dir = `C:\Users\test`
+	}
+	workingDirJSON := `{"` + runtime.GOOS + `":` + strconv.Quote(dir) + `}`
 	_, cleanup := testDBCreateCommand(
 		t,
 		"test-cat-ml-18",
@@ -181,9 +204,22 @@ func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
 		t.Errorf("Error = %q, want empty", record.Error)
 	}
 
-	want := "cd '/Users/test' && line1\nline2\n"
-	if record.FinalCmd != want {
-		t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
+	if runtime.GOOS != "windows" {
+		want := "cd '/Users/test' && line1\nline2\n"
+		if record.FinalCmd != want {
+			t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
+		}
+		return
+	}
+
+	// Shell-agnostic proof that both script lines got their own submitted
+	// line: two CRs total (one per line), and no LF anywhere. Byte-exact
+	// shape per shell is covered by TestBuildCommandLine.
+	if got := strings.Count(record.FinalCmd, "\r"); got != 2 {
+		t.Errorf("FinalCmd = %q, want exactly 2 \\r, got %d", record.FinalCmd, got)
+	}
+	if strings.Contains(record.FinalCmd, "\n") {
+		t.Errorf("FinalCmd = %q, want no \\n on Windows", record.FinalCmd)
 	}
 }
 
@@ -305,13 +341,15 @@ func TestRunCommand_ExecutesOnActiveSession(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 
 	// testWithTerminalSvc creates a default session and makes it active.
+	// "echo ok" rather than "true": true isn't a recognized command on
+	// Windows shells, so this keeps the happy path happy on every platform.
 	_, cleanup := testDBCreateCommand(
 		t,
 		"test-cat-exec-24",
 		"test-cmd-exec-24",
 		"TestExec",
 		"Test Cmd Exec",
-		"true",
+		"echo ok",
 		`{}`,
 	)
 	defer cleanup()
@@ -321,8 +359,12 @@ func TestRunCommand_ExecutesOnActiveSession(t *testing.T) {
 	if record.Error != "" {
 		t.Errorf("Error = %q, want empty (happy path)", record.Error)
 	}
-	if record.FinalCmd != "true\n" {
-		t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, "true\n")
+	want := "echo ok\n"
+	if runtime.GOOS == "windows" {
+		want = "echo ok\r"
+	}
+	if record.FinalCmd != want {
+		t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
 	}
 }
 
@@ -342,6 +384,85 @@ func TestShellQuoteDir(t *testing.T) {
 			got := shellQuoteDir(tt.dir)
 			if got != tt.want {
 				t.Errorf("shellQuoteDir(%q) = %q, want %q", tt.dir, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildCommandLine is the cross-platform contract for issue #63: the
+// line RunCommand writes must be terminated by the key the target shell
+// actually accepts, and the cd prefix must be syntax that shell can parse.
+// Classification is by shell base name alone (shellDialectFor), so every
+// Windows case below is exercised on Linux CI too — there is no other seam
+// that can prove Windows behavior without a Windows runner.
+func TestBuildCommandLine(t *testing.T) {
+	const psWin = `C:\Program Files\PowerShell\7\pwsh.exe`
+	const ps51 = `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+	const cmdExe = `C:\Windows\System32\cmd.exe`
+
+	tests := []struct {
+		name       string
+		shellPath  string
+		script     string
+		workingDir string
+		want       string
+	}{
+		// POSIX — must stay byte-identical to pre-fix behavior.
+		{"posix no wd", "/bin/zsh", "echo hello", "", "echo hello\n"},
+		{"posix with wd", "/bin/zsh", "echo hello", "/Users/test", "cd '/Users/test' && echo hello\n"},
+		{
+			"posix wd with apostrophe", "/bin/bash", "echo hi", "/Users/O'Brien",
+			`cd '/Users/O'"'"'Brien' && echo hi` + "\n",
+		},
+		{
+			"posix multiline keeps LF", "/bin/zsh", "line1\nline2", "/Users/test",
+			"cd '/Users/test' && line1\nline2\n",
+		},
+		{"posix leaves CRLF alone", "/bin/zsh", "line1\r\nline2", "", "line1\r\nline2\n"},
+		{"unknown shell defaults to posix", "/usr/bin/dash", "echo hi", "", "echo hi\n"},
+		{"empty shell path defaults to posix", "", "echo hi", "", "echo hi\n"},
+
+		// PowerShell — CR submits; Set-Location, never &&.
+		{"pwsh no wd", psWin, "echo hello", "", "echo hello\r"},
+		{
+			"pwsh with wd", psWin, "echo hello", `C:\Users\test`,
+			`Set-Location -LiteralPath 'C:\Users\test' -ErrorAction Stop; echo hello` + "\r",
+		},
+		{
+			"windows powershell 5.1 uses no && operator", ps51, "echo hello", `C:\Users\test`,
+			`Set-Location -LiteralPath 'C:\Users\test' -ErrorAction Stop; echo hello` + "\r",
+		},
+		{
+			"pwsh wd with apostrophe is doubled", psWin, "echo hi", `C:\Users\O'Brien`,
+			`Set-Location -LiteralPath 'C:\Users\O''Brien' -ErrorAction Stop; echo hi` + "\r",
+		},
+		{"pwsh multiline submits each line", psWin, "line1\nline2", "", "line1\rline2\r"},
+		{"pwsh CRLF does not become a double Enter", psWin, "line1\r\nline2", "", "line1\rline2\r"},
+
+		// cmd.exe — CR submits; cd /d + double quotes; && is supported.
+		{"cmd no wd", cmdExe, "echo hello", "", "echo hello\r"},
+		{
+			"cmd with wd needs /d to cross drives", cmdExe, "echo hello", `D:\work`,
+			`cd /d "D:\work" && echo hello` + "\r",
+		},
+		{
+			"cmd wd with spaces", cmdExe, "echo hi", `C:\Program Files\app`,
+			`cd /d "C:\Program Files\app" && echo hi` + "\r",
+		},
+		{
+			"cmd multiline", cmdExe, "line1\nline2", `D:\work`,
+			`cd /d "D:\work" && line1` + "\rline2\r",
+		},
+		{"bare cmd with no extension", "cmd", "echo hi", "", "echo hi\r"},
+		{"case-insensitive CMD.EXE", `C:\Windows\System32\CMD.EXE`, "echo hi", "", "echo hi\r"},
+		{"unix-style pwsh path", "/usr/local/bin/pwsh", "echo hi", "", "echo hi\r"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildCommandLine(tt.shellPath, tt.script, tt.workingDir); got != tt.want {
+				t.Errorf("buildCommandLine(%q, %q, %q) = %q, want %q",
+					tt.shellPath, tt.script, tt.workingDir, got, tt.want)
 			}
 		})
 	}

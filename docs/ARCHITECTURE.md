@@ -134,14 +134,14 @@ Integration is toggled by `AppSettings.ShellIntegration` (nil = enabled). Change
 
 ### Command Execution (`execution_service.go`)
 
-`executor.go` is *not* an execution engine despite the name. It holds shell selection (`$SHELL -lc` on Unix falling back to `/bin/sh`; `cmd /C` on Windows), `stripShebang`, `shellQuoteDir`, and `EvalDefaults` (CEL). Nothing in the codebase writes temp scripts or spawns subprocesses.
+`executor.go` is *not* an execution engine despite the name. It holds shell selection (`$SHELL -lc` on Unix falling back to `/bin/sh`; `cmd /C` on Windows), `stripShebang`, `shellQuoteDir`, `shellDialectFor`/`buildCommandLine`, and `EvalDefaults` (CEL). Nothing in the codebase writes temp scripts or spawns subprocesses.
 
 `RunCommand(commandID, variables)` does the following:
 
 1. Load the command; substitute `{{vars}}` via `ReplaceTemplateVars`.
 2. `stripShebang`, then trim trailing newlines.
-3. If — and only if — the command or global settings define a working directory for the current OS, prefix `cd '<dir>' && ` using `shellQuoteDir` (POSIX single-quote escaping).
-4. Append `\n` and write the whole line to the **active session's PTY** via `terminalSvc.Write`.
+3. Resolve the active session's shell (`SessionInfo.ShellPath`, falling back to `detectShell()` for a not-yet-started session) and the working directory (`""` if none is configured), then call `buildCommandLine(shellPath, script, workingDir)`.
+4. `buildCommandLine` classifies the shell by base name into a dialect (POSIX / cmd.exe / PowerShell — see `shellDialectFor`) and composes the final line: an optional cd prefix syntactically correct for that dialect — POSIX `cd '<dir>' && ` (`shellQuoteDir`), cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` (Windows PowerShell 5.1 has no `&&` operator; `-ErrorAction Stop` preserves short-circuit-on-failure) — followed by the script, with every line terminated by the dialect's actual submit key: `\n` for POSIX (a Unix pty's line discipline accepts it), `\r` for cmd.exe/PowerShell (ConPTY has no line discipline and delivers a bare LF as a literal Ctrl+J, not Enter — see issue #63). Write the finished line to the **active session's PTY** via `terminalSvc.Write`.
 
 Consequences worth internalizing:
 
@@ -287,7 +287,8 @@ User presses Run (⌘/Ctrl+Enter)
 │ ExecutionService.RunCommand(id, variables)   │
 │   1. load command from DB                     │
 │   2. ReplaceTemplateVars → stripShebang       │
-│   3. optional "cd '<dir>' && " prefix         │
+│   3. buildCommandLine(shellPath, script, wd)  │
+│      → shell-dialect cd prefix + submit key   │
 │   4. terminalSvc.Write(activeSession, line)   │
 └─────────┬────────────────────────────────────┘
           │
@@ -393,10 +394,10 @@ Capturing output via OSC 133 markers is only trustworthy if a command cannot pri
 
 Documented deliberately; see `AGENTS.md` for the full discussion.
 
-- **`shellQuoteDir` is POSIX-only.** The `cd '<dir>' && ` prefix uses single-quote escaping, which is meaningless to cmd.exe and PowerShell.
 - **`buildPtyEnv` is not fully Windows-correct.** Windows' `os.Environ()` includes per-drive cwd entries like `=C:=C:\foo`, which `strings.Cut(kv, "=")` collapses into one malformed entry; Windows env names are also case-insensitive while the function's map keys are not.
-- **Command dispatch assumes `\n` submits a line.** cmd.exe and PowerShell generally expect `\r`. This affects only "run this saved command", not interactive typing (xterm.js sends the right bytes).
 - **The `executions` table and its DB methods are vestigial.** Nothing in production writes or reads history.
+
+Fixed (issue #63): dispatch previously always terminated a line with `\n` and always used `shellQuoteDir`'s POSIX single-quote escaping for the cd prefix — neither of which cmd.exe or PowerShell can execute (ConPTY has no tty line discipline, so LF never submits; Windows PowerShell 5.1 has no `&&` operator). `buildCommandLine`/`shellDialectFor` (`executor.go`) now pick the submit key and cd-prefix syntax per shell dialect.
 
 ---
 

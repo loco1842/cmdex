@@ -348,7 +348,7 @@ The following behaviors vary by operating system at runtime (not configurable by
 | Output post-processing | ANSI stripping only | ANSI stripping only | ANSI stripping **plus** removal of ConPTY's injected line-wrap artifacts (`ansi.go`) |
 | Settings shortcut | `Cmd + ,` | `Ctrl + ,` | `Ctrl + ,` |
 
-**Known Windows gaps** (documented in `AGENTS.md`): the `cd '<dir>' && ` prefix uses POSIX single-quote escaping, which is meaningless to cmd.exe and PowerShell; `buildPtyEnv` mishandles Windows' per-drive cwd entries (`=C:=C:\foo`) and case-insensitive variable names; and command dispatch assumes `\n` submits a line, where Windows shells generally expect `\r`.
+**Known Windows gap** (documented in `AGENTS.md`): `buildPtyEnv` mishandles Windows' per-drive cwd entries (`=C:=C:\foo`) and case-insensitive variable names. (The command-dispatch line-submit and cd-prefix issues that used to be listed here are fixed — see `buildCommandLine`/`shellDialectFor` in `executor.go`.)
 
 ### Build Configuration Overrides
 

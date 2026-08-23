@@ -126,14 +126,6 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
 	resolvedScript = stripShebang(resolvedScript)
 	resolvedScript = strings.TrimRight(resolvedScript, "\n")
-	workingDir := s.resolveWorkingDir(cmd)
-
-	var cmdLine string
-	if s.hasExplicitWorkingDir(cmd) {
-		cmdLine = fmt.Sprintf("cd %s && %s\n", shellQuoteDir(workingDir), resolvedScript)
-	} else {
-		cmdLine = resolvedScript + "\n"
-	}
 
 	if terminalSvc == nil {
 		return ExecutionRecord{
@@ -150,6 +142,27 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 			ExitCode: -1,
 		}
 	}
+
+	// Both the cd syntax and the key that submits the line depend on which
+	// shell this session is actually running. CreateSession starts the PTY
+	// eagerly, so ShellPath is normally already populated; the fallback
+	// covers a session whose PTY hasn't started yet (Write would start it
+	// lazily a moment later) and resolves to the same detectShell() call
+	// startSessionLocked would make.
+	shellPath := session.ShellPath
+	if shellPath == "" {
+		shellPath, _ = detectShell()
+	}
+
+	// "" means no cd prefix — hasExplicitWorkingDir is what decides, since
+	// resolveWorkingDir always returns something (home/cwd/temp fallbacks).
+	workingDir := ""
+	if s.hasExplicitWorkingDir(cmd) {
+		workingDir = s.resolveWorkingDir(cmd)
+	}
+
+	cmdLine := buildCommandLine(shellPath, resolvedScript, workingDir)
+
 	if err := terminalSvc.Write(session.ID, cmdLine); err != nil {
 		return ExecutionRecord{
 			ID:       uuid.New().String(),

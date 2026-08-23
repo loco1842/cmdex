@@ -147,7 +147,7 @@ The return value of `RunCommand`. Despite the name, it is **not** persisted anyw
 | `id` | `string` | UUID, generated per call |
 | `commandId` | `string` | ID of the dispatched command |
 | `scriptContent` | `string` | Unused on the current path (empty) |
-| `finalCmd` | `string` | The exact line written to the PTY, including any `cd '<dir>' && ` prefix and trailing newline |
+| `finalCmd` | `string` | The exact line written to the PTY, including any shell-dialect cd prefix and its line-submit key (`\n` on POSIX, `\r` on cmd.exe/PowerShell) |
 | `output` | `string` | Unused — output streams over `pty-output:<id>` instead (empty) |
 | `error` | `string` | Populated only on dispatch failure (no active session, write error, command not found) |
 | `exitCode` | `number` | `-1` on dispatch failure; `0` (zero value) on success — it is **not** the command's exit code |
@@ -445,8 +445,8 @@ const record: ExecutionRecord = await RunCommand(cmd.id, { message: 'hello world
 
 1. Loads the command and substitutes `{{vars}}`.
 2. Strips any shebang and trims trailing newlines.
-3. If — and only if — the command or global settings define a working directory for the current OS, prefixes `cd '<dir>' && ` (POSIX single-quote escaping).
-4. Appends `\n` and calls `TerminalService.Write` on the active session.
+3. Resolves the active session's shell (falling back to `detectShell()` if the session hasn't started yet) and the working directory (empty if none is configured), then calls `buildCommandLine(shellPath, script, workingDir)` (`executor.go`).
+4. `buildCommandLine` prefixes a shell-dialect-correct `cd` (only if a working directory was resolved) — POSIX `cd '<dir>' && `, cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` — and terminates every line with the dialect's submit key (`\n` for POSIX, `\r` for cmd.exe/PowerShell — ConPTY has no tty line discipline and treats a bare LF as a literal keystroke rather than Enter). The result is passed to `TerminalService.Write` on the active session.
 
 **Because it goes through a real PTY:**
 
@@ -939,4 +939,4 @@ This resolution happens in `ExecutionService.resolveWorkingDir()` (Go backend) a
 
 A separate check, `hasExplicitWorkingDir`, decides whether a `cd` prefix is emitted at all: only steps 1 and 2 count as "explicit". When neither the command nor global settings specify a directory, no `cd` is prepended and the shell simply stays where it is — the later fallbacks exist for callers that need a concrete path, not to pin every command to `$HOME`.
 
-The resolved path appears in `ExecutionRecord.finalCmd` (inside the `cd '<dir>' && ` prefix) when a prefix was emitted. `ExecutionRecord.workingDir` is **not** populated on this path.
+The resolved path appears in `ExecutionRecord.finalCmd` (inside the cd prefix `buildCommandLine` emits) when a prefix was emitted. `ExecutionRecord.workingDir` is **not** populated on this path.

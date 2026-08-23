@@ -79,7 +79,7 @@ Seven services are registered as `application.Service` in `main.go` — not a si
 | `models.go` | Data types: `Category`, `Command`, `VariableDefinition`, `VariablePreset`, `VariablePrompt`, `ExecutionRecord`, `AppSettings`, `OSPathMap` |
 | `db.go` | SQLite layer: connection (WAL + foreign keys), migration runner, FTS5 search, all SQL |
 | `script.go` | `GenerateScript`, `ParseScriptBody`, `ExtractTemplateVars`, `ReplaceTemplateVars`, `MergeDetectedVars` — pure functions, no I/O |
-| `executor.go` | Shell selection (`$SHELL -lc` on Unix, `cmd /C` on Windows), `stripShebang`, `shellQuoteDir`, and `EvalDefaults` (CEL) |
+| `executor.go` | Shell selection (`$SHELL -lc` on Unix, `cmd /C` on Windows), `stripShebang`, `shellQuoteDir`, `shellDialectFor`/`buildCommandLine` (per-shell cd prefix + line-submit key), and `EvalDefaults` (CEL) |
 | `migrations/` | Versioned migrations `0001`–`0010`; `migration.go` holds the ordered `Migrations` slice |
 
 **`executor.go` no longer executes anything.** It is a helper type: shell detection plus CEL default evaluation. Nothing writes temp scripts or spawns subprocesses any more.
@@ -89,8 +89,8 @@ Seven services are registered as `application.Service` in `main.go` — not a si
 `ExecutionService.RunCommand(commandID, variables)`:
 
 1. Loads the command, applies `ReplaceTemplateVars`, then `stripShebang` and trims trailing newlines.
-2. If (and only if) the command or global settings define a working directory for the current OS, prefixes `cd '<dir>' && ` (`shellQuoteDir`, POSIX quoting).
-3. Appends `\n` and writes the whole line to the **active terminal session's PTY** via `terminalSvc.Write`.
+2. Determines the active session's shell (`SessionInfo.ShellPath`, falling back to `detectShell()` for a not-yet-started session) and passes it, the script, and the resolved working directory (`""` if none is configured) to `buildCommandLine` (`executor.go`).
+3. `buildCommandLine` composes the final line: a cd prefix syntactically correct for the shell's dialect — POSIX `cd '<dir>' && `, cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` (no `&&` operator on Windows PowerShell 5.1; `-ErrorAction Stop` keeps the short-circuit-on-failure behavior) — then the script, each line terminated by the shell's actual submit key: `\n` for POSIX shells (tty line discipline), `\r` for cmd.exe/PowerShell (ConPTY has no line discipline; it delivers LF as a literal Ctrl+J, not Enter). The finished line is written to the **active terminal session's PTY** via `terminalSvc.Write`.
 
 Output therefore streams back through that session's `pty-output:<id>` event and is rendered by xterm.js in `Terminal.tsx` — `RunCommand` does not capture output. The returned `ExecutionRecord` carries `FinalCmd` and errors only; `Output`/`ExitCode` are not populated on the success path, and nothing is persisted to history. Ctrl+C works because the PTY has a real foreground process group.
 
@@ -260,7 +260,7 @@ Then append the new migration to the `Migrations` slice in `migrations/migration
 | Env | `pty_env_test.go` |
 | Frontend e2e | `frontend/e2e/tests/*.spec.ts` (Playwright) |
 
-`TestTerminalShutdown`/`TestTerminalExit` and `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` are Windows-skipped — they assume Unix shell syntax and POSIX quoting, not because the Windows backend is unsupported. See **Known Cross-Platform Gaps** in `AGENTS.md`.
+`TestTerminalShutdown`/`TestTerminalExit` are Windows-skipped — they call the raw `ptyStart` helper with Unix shell syntax, not because the Windows backend is unsupported. See **Known Cross-Platform Gaps** in `AGENTS.md`. `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` run on every platform; `TestBuildCommandLine` (`execution_service_test.go`) is the platform-independent table test covering POSIX/cmd.exe/PowerShell command-line construction, and `shell_integration_test.go`'s `TestPwshIntegration_*` suite includes Windows-only ConPTY execution tests gated on `pwshRealPTYSkipReason`.
 
 ## Conventions
 
