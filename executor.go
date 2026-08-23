@@ -119,7 +119,18 @@ func (d shellDialect) submitKey() string {
 // cdPrefix returns the change-directory command plus the separator that
 // keeps it on the SAME submitted line as the script that follows, so the
 // script does not run when the directory is unusable.
+//
+// CR and LF are stripped here, once, ahead of the per-dialect quoting below:
+// no real filesystem path legitimately contains either (unlike '%', there is
+// no usability cost to removing them), and each is byte-identical to some
+// dialect's submit key ('\r' for cmd.exe/PowerShell, '\n' for POSIX — see
+// submitKey). Left in place, a crafted workingDir could inject an early
+// Enter into the interactive shell in the middle of this cd command,
+// splitting it into independently-submitted fragments before the quoting
+// below even runs.
 func (d shellDialect) cdPrefix(dir string) string {
+	dir = strings.ReplaceAll(dir, "\r", "")
+	dir = strings.ReplaceAll(dir, "\n", "")
 	switch d {
 	case dialectCmd:
 		// cmd's bare `cd` will not cross drives: `cd D:\x` from C: changes
@@ -140,6 +151,32 @@ func (d shellDialect) cdPrefix(dir string) string {
 		return "cd " + shellQuoteDir(dir) + " && "
 	}
 	return "cd " + shellQuoteDir(dir) + " && "
+}
+
+// groupDelims returns the open/close tokens that wrap a multi-line script
+// into ONE unit for cdPrefix's && / -ErrorAction Stop to gate — see
+// buildCommandLine. Each is a well-established multi-line construct native
+// to its shell (an interactively-typed unclosed brace/paren is what already
+// makes multi-line function/block definitions work at these shells'
+// prompts), so accumulating the script's separately-submitted lines behind
+// the open token and only closing it after the last one costs nothing
+// beyond the two extra tokens.
+//
+// PowerShell dot-sources ("." rather than "&") specifically so variables
+// and functions the script defines land in the CURRENT session scope
+// instead of a child scope that disappears once the block returns — "&"
+// would silently make e.g. an exported variable invisible to whatever the
+// user types next in that terminal.
+func (d shellDialect) groupDelims() (string, string) {
+	switch d {
+	case dialectCmd:
+		return "( ", ")"
+	case dialectPowerShell:
+		return ". { ", "}"
+	case dialectPOSIX:
+		return "{ ", "}"
+	}
+	return "{ ", "}"
 }
 
 // cmdQuoteDir wraps dir in double quotes for cmd.exe. " is stripped first —
@@ -186,18 +223,42 @@ func psQuoteDir(dir string) string {
 // submits an empty line at the prompt. The POSIX path is left untouched
 // byte-for-byte, CRLF included, so nothing changes on the platforms where
 // dispatch already works.
+//
+// When workingDir is set AND script spans multiple lines, the whole script
+// is wrapped in the shell's own grouping construct (see groupDelims) rather
+// than appended plainly after cdPrefix. Without that, cdPrefix's && /
+// -ErrorAction Stop only gates whatever immediately follows it on the SAME
+// submitted line — the script's first line — leaving every later line
+// (submitted separately, per the paragraph above) to run unconditionally,
+// in whatever directory the shell was already in, even after a failed cd.
+// Grouping makes the whole script one unit that single gate covers. A
+// single-line script needs none of this: cdPrefix already gates it
+// directly, so that case (already exercised against real Windows hardware
+// by TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir) is left
+// byte-for-byte as before.
 func buildCommandLine(shellPath, script, workingDir string) string {
 	d := shellDialectFor(shellPath)
 	key := d.submitKey()
 
 	line := script
+	suffix := ""
 	if workingDir != "" {
-		line = d.cdPrefix(workingDir) + script
+		prefix := d.cdPrefix(workingDir)
+		if strings.Contains(script, "\n") {
+			open, groupClose := d.groupDelims()
+			line = prefix + open + script
+			suffix = groupClose
+		} else {
+			line = prefix + script
+		}
 	}
 
 	if key != "\n" {
 		line = strings.ReplaceAll(line, "\r\n", "\n")
 		line = strings.ReplaceAll(line, "\n", key)
+	}
+	if suffix != "" {
+		return line + key + suffix + key
 	}
 	return line + key
 }

@@ -205,18 +205,21 @@ func TestRunCommand_FinalCmdMultilineScript(t *testing.T) {
 	}
 
 	if runtime.GOOS != "windows" {
-		want := "cd '/Users/test' && line1\nline2\n"
+		// Grouped in { }: cdPrefix's && would otherwise only gate line1,
+		// leaving line2 to run unconditionally even after a failed cd — see
+		// TestBuildCommandLine's "posix multiline ... is grouped" case.
+		want := "cd '/Users/test' && { line1\nline2\n}\n"
 		if record.FinalCmd != want {
 			t.Errorf("FinalCmd = %q, want %q", record.FinalCmd, want)
 		}
 		return
 	}
 
-	// Shell-agnostic proof that both script lines got their own submitted
-	// line: two CRs total (one per line), and no LF anywhere. Byte-exact
-	// shape per shell is covered by TestBuildCommandLine.
-	if got := strings.Count(record.FinalCmd, "\r"); got != 2 {
-		t.Errorf("FinalCmd = %q, want exactly 2 \\r, got %d", record.FinalCmd, got)
+	// Shell-agnostic proof that both script lines, plus the closing group
+	// token, each got their own submitted line: three CRs total, and no LF
+	// anywhere. Byte-exact shape per shell is covered by TestBuildCommandLine.
+	if got := strings.Count(record.FinalCmd, "\r"); got != 3 {
+		t.Errorf("FinalCmd = %q, want exactly 3 \\r, got %d", record.FinalCmd, got)
 	}
 	if strings.Contains(record.FinalCmd, "\n") {
 		t.Errorf("FinalCmd = %q, want no \\n on Windows", record.FinalCmd)
@@ -415,8 +418,17 @@ func TestBuildCommandLine(t *testing.T) {
 			`cd '/Users/O'"'"'Brien' && echo hi` + "\n",
 		},
 		{
-			"posix multiline keeps LF", "/bin/zsh", "line1\nline2", "/Users/test",
-			"cd '/Users/test' && line1\nline2\n",
+			// Grouped in { }: without it, only line1 would be gated by the
+			// cd's success (see "posix multiline with bad-looking wd still
+			// grouped" and TestBuildCommandLine's cmd/pwsh equivalents) —
+			// line2 would run unconditionally as its own, separately
+			// submitted line even if the cd had failed.
+			"posix multiline keeps LF and is grouped so cd gates both lines", "/bin/zsh", "line1\nline2", "/Users/test",
+			"cd '/Users/test' && { line1\nline2\n}\n",
+		},
+		{
+			"posix multiline with no wd is not grouped", "/bin/zsh", "line1\nline2", "",
+			"line1\nline2\n",
 		},
 		{"posix leaves CRLF alone", "/bin/zsh", "line1\r\nline2", "", "line1\r\nline2\n"},
 		{"unknown shell defaults to posix", "/usr/bin/dash", "echo hi", "", "echo hi\n"},
@@ -438,6 +450,14 @@ func TestBuildCommandLine(t *testing.T) {
 		},
 		{"pwsh multiline submits each line", psWin, "line1\nline2", "", "line1\rline2\r"},
 		{"pwsh CRLF does not become a double Enter", psWin, "line1\r\nline2", "", "line1\rline2\r"},
+		{
+			// Dot-sourced ("." not "&") so the block runs in the current
+			// session scope, not a child scope that disappears once it
+			// returns — otherwise a script's own variable/function
+			// definitions would vanish right after it ran.
+			"pwsh multiline with wd is grouped in a dot-sourced block", psWin, "line1\nline2", `C:\Users\test`,
+			`Set-Location -LiteralPath 'C:\Users\test' -ErrorAction Stop; . { line1` + "\rline2\r}\r",
+		},
 
 		// cmd.exe — CR submits; cd /d + double quotes; && is supported.
 		{"cmd no wd", cmdExe, "echo hello", "", "echo hello\r"},
@@ -450,8 +470,15 @@ func TestBuildCommandLine(t *testing.T) {
 			`cd /d "C:\Program Files\app" && echo hi` + "\r",
 		},
 		{
-			"cmd multiline", cmdExe, "line1\nline2", `D:\work`,
-			`cd /d "D:\work" && line1` + "\rline2\r",
+			// Grouped in ( ): cmd.exe's own "More?" continuation for an
+			// unclosed paren accumulates line1/line2/) into one block that
+			// && gates as a unit, instead of only gating line1.
+			"cmd multiline is grouped so cd gates both lines", cmdExe, "line1\nline2", `D:\work`,
+			`cd /d "D:\work" && ( line1` + "\rline2\r)\r",
+		},
+		{
+			"cmd multiline with no wd is not grouped", cmdExe, "line1\nline2", "",
+			"line1\rline2\r",
 		},
 		{
 			// cmd.exe expands %VAR% even inside double quotes, so a
@@ -462,6 +489,24 @@ func TestBuildCommandLine(t *testing.T) {
 			// treatment as ", just for a different reason.
 			"cmd wd with percent has it stripped to prevent var expansion", cmdExe, "echo hi", `C:\Users\test\%windir%`,
 			`cd /d "C:\Users\test\windir" && echo hi` + "\r",
+		},
+		{
+			// A CR/LF embedded in workingDir (e.g. from a hand-edited import
+			// file) is byte-identical to some dialect's own submit key —
+			// left in, it would inject an early Enter into the middle of
+			// the cd command itself, before per-dialect quoting even runs.
+			// No real path legitimately contains either, so stripping is
+			// free of the tradeoff % stripping has.
+			"cmd wd with embedded CRLF has it stripped", cmdExe, "echo hi", "C:\\evil\r\ncalc.exe",
+			`cd /d "C:\evilcalc.exe" && echo hi` + "\r",
+		},
+		{
+			"pwsh wd with embedded CR has it stripped", psWin, "echo hi", "C:\\evil\rcalc.exe",
+			`Set-Location -LiteralPath 'C:\evilcalc.exe' -ErrorAction Stop; echo hi` + "\r",
+		},
+		{
+			"posix wd with embedded LF has it stripped", "/bin/zsh", "echo hi", "/tmp/evil\ncalc",
+			"cd '/tmp/evilcalc' && echo hi\n",
 		},
 		{"bare cmd with no extension", "cmd", "echo hi", "", "echo hi\r"},
 		{"case-insensitive CMD.EXE", `C:\Windows\System32\CMD.EXE`, "echo hi", "", "echo hi\r"},

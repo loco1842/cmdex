@@ -1132,6 +1132,47 @@ func TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir(t *testing.T) {
 	}
 }
 
+// TestPwshIntegration_MultilineScriptShortCircuitsOnBadDir is the multi-line
+// counterpart to TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir:
+// a multi-line script's lines are each submitted separately (see
+// buildCommandLine's doc comment), so without grouping them into one unit,
+// -ErrorAction Stop would only gate the script's FIRST line — the second
+// line would run unconditionally as its own, independently-submitted
+// command even though the cd failed. groupDelims' dot-sourced "{ }" block
+// is what makes the whole script one thing that single terminating error
+// gates.
+func TestPwshIntegration_MultilineScriptShortCircuitsOnBadDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	badDir := filepath.Join(t.TempDir(), "does-not-exist")
+	shellPath, _ := detectShell()
+	line := buildCommandLine(
+		shellPath,
+		"Write-Output ('SHOULD' + '-NOT-RUN-1')\nWrite-Output ('SHOULD' + '-NOT-RUN-2')",
+		badDir,
+	)
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if strings.Contains(out.Text, "SHOULD-NOT-RUN") {
+		t.Errorf(
+			"output = %q, want it to contain neither SHOULD-NOT-RUN-1 nor -2 — "+
+				"script ran (at least partially) despite a bad working directory",
+			out.Text,
+		)
+	}
+}
+
 // TestPwshIntegration_CommandNotFoundOutputIsCaptured is the decisive test
 // for the "copy last output copies blank lines for a failed command" bug: a
 // command that doesn't exist prints its error through pwsh's error-record
