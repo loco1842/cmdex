@@ -139,10 +139,10 @@ type sessionState struct {
 	capCarry       []byte
 	capturing      bool
 	capTruncated   bool
-	lastOutput    string
-	lastExitCode  int
-	lastTruncated bool
-	lastValid     bool
+	lastOutput     string
+	lastExitCode   int
+	lastTruncated  bool
+	lastValid      bool
 }
 
 // TerminalService manages multiple PTY-backed shell sessions.
