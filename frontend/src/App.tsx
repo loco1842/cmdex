@@ -204,8 +204,13 @@ function App() {
     const copyLastOutput = useCallback(async (sessionId: string) => {
         const captured = await GetLastOutput(sessionId).catch(() => null);
         const ref = terminalRefs.current[sessionId];
-        const capturedText = captured?.available ? captured.text : '';
-        const usedCapture = capturedText.trim() !== '';
+        // available and text are set together (terminal_capture.go's 'D'
+        // handler) — a blank text alongside available:true means the command
+        // genuinely produced no output, not a bad capture, so it must not
+        // fall through to the xterm scrape (which would pick up the echoed
+        // input line instead and copy that with a misleading "copied" toast).
+        const usedCapture = captured?.available ?? false;
+        const capturedText = usedCapture ? captured.text : '';
         const output = usedCapture ? capturedText : (ref?.getLastOutput() || '');
         if (!output.trim()) {
             toast.error(t('toast.outputEmpty'));

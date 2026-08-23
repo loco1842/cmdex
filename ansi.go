@@ -1,7 +1,6 @@
 package main
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -240,11 +239,17 @@ func collapseCarriageReturns(line string) string {
 	if !strings.Contains(line, "\r") {
 		return line
 	}
-	segments := strings.Split(line, "\r")
-	for _, seg := range slices.Backward(segments) {
-		if seg != "" {
-			return seg
+	// Scan backward from the end, one '\r'-delimited segment at a time,
+	// stopping at the first non-empty one — equivalent to strings.Split
+	// followed by a reverse walk, but without allocating a segment per '\r'
+	// in a line a spinner may have redrawn thousands of times.
+	end := len(line)
+	for end > 0 {
+		start := strings.LastIndexByte(line[:end], '\r') + 1
+		if start < end {
+			return line[start:end]
 		}
+		end = start - 1
 	}
 	return ""
 }
