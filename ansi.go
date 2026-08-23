@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -134,11 +135,10 @@ const (
 //   - Other two-byte escapes: ESC followed by a single character (e.g. RIS,
 //     charset selection) that don't fit the CSI/OSC shape above.
 //
-// Carriage returns are handled per line: only the text after the last bare
-// '\r' on a line survives, which collapses in-place progress-bar/spinner
-// redraws down to their final state instead of keeping every intermediate
-// frame. '\r\n' is normalized to '\n' first so real line breaks aren't
-// treated as redraws.
+// Carriage returns are handled per line via collapseCarriageReturns, which
+// collapses in-place progress-bar/spinner redraws down to their final state
+// instead of keeping every intermediate frame. '\r\n' is normalized to '\n'
+// first so real line breaks aren't treated as redraws.
 //
 // cols is the session's actual terminal width, used to recognize and elide
 // ConPTY's own line-wrap injection artifacts before any of the above runs —
@@ -195,9 +195,35 @@ func stripANSI(s string, cols int) string {
 
 	lines := strings.Split(stripped, "\n")
 	for idx, line := range lines {
-		if last := strings.LastIndexByte(line, '\r'); last != -1 {
-			lines[idx] = line[last+1:]
-		}
+		lines[idx] = collapseCarriageReturns(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// collapseCarriageReturns collapses a single line's in-place '\r' redraws
+// down to their final state, the way a terminal overwrites a line from
+// column 0 every time it sees a bare CR: it returns the LAST NON-EMPTY
+// segment between carriage returns, not unconditionally "everything after
+// the final one".
+//
+// That distinction matters for a trailing CR with nothing written after it —
+// e.g. a ConPTY-repainted row, or how PowerShell renders an error record —
+// which means nothing actually overwrote the line. Naively keeping only the
+// text after the last '\r' would discard the whole line in that case (an
+// empty final segment), silently wiping real output; this previously made
+// "copy last output" return blank lines for a failed command on Windows
+// instead of the error text. Splitting on '\r' (a single ASCII byte, never a
+// UTF-8 continuation byte) is safe to do on the raw string without decoding
+// runes.
+func collapseCarriageReturns(line string) string {
+	if !strings.Contains(line, "\r") {
+		return line
+	}
+	segments := strings.Split(line, "\r")
+	for _, seg := range slices.Backward(segments) {
+		if seg != "" {
+			return seg
+		}
+	}
+	return ""
 }

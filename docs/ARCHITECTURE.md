@@ -117,6 +117,8 @@ Each session owns a `sessionState` guarded by its own mutex, and streams bytes t
 
 **Why `ansi.go` is more than a regex:** unlike a Unix PTY, where line wrapping is purely a client-rendering concern, ConPTY splits long lines with *real* CRLF bytes plus a cursor-reposition escape, and re-emits the boundary character (VT100 deferred-wrap behavior). Stripping only the escape leaves an injected newline mid-word — enough to turn copied JSON into invalid JSON. `removeWrapArtifacts` recognizes the full pattern and rejoins the text, deduplicating the boundary rune. It needs the session's true configured width to match anything.
 
+`stripANSI` also collapses bare `\r` redraws per line via `collapseCarriageReturns`, keeping the **last non-empty** segment between carriage returns rather than unconditionally "everything after the final one" — a trailing `\r` with nothing written after it (a ConPTY repaint, or how PowerShell renders an error record) means nothing overwrote the line, so the content before it must survive. Naively keeping only the text after the last `\r` discarded the whole line in that case, which used to make "copy last output" return blank lines for a failed command on Windows instead of the actual error text.
+
 ### Shell Integration & Output Capture
 
 Shell integration makes "copy last output" exact instead of scraping the terminal buffer.

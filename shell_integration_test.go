@@ -1131,3 +1131,49 @@ func TestPwshIntegration_WorkingDirPrefixShortCircuitsOnBadDir(t *testing.T) {
 		)
 	}
 }
+
+// TestPwshIntegration_CommandNotFoundOutputIsCaptured is the decisive test
+// for the "copy last output copies blank lines for a failed command" bug: a
+// command that doesn't exist prints its error through pwsh's error-record
+// rendering rather than Write-Output, which is the one code path that was
+// producing lines ending in a bare CR with nothing written after it —
+// collapseCarriageReturns (ansi.go) exists specifically to stop that from
+// wiping the line down to "".
+//
+// On failure this dumps the raw captured text with %q rather than a
+// trimmed/asserted-on comparison, on purpose: that is what distinguishes
+// "the text arrived but got mangled by stripANSI" (another CR/erase shape
+// this test's fix doesn't yet cover) from "the text never arrived at all"
+// (a marker-ordering problem — cmdex.ps1's "C" marker and PowerShell's own
+// error rendering write through two different console text writers, so an
+// unflushed "C" landing after the error text would reset capBuf over it,
+// per captureScan's 'C' case in terminal_capture.go). Either failure mode
+// needs a different fix, so the dump is what tells them apart.
+func TestPwshIntegration_CommandNotFoundOutputIsCaptured(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if reason := pwshRealPTYSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
+
+	s := newTestTerminalServiceWithShellIntegration(t)
+	id := mustCreateAndStart(t, s)
+
+	shellPath, _ := detectShell()
+	line := buildCommandLine(shellPath, "cmdexNoSuchCommand12345", "")
+	if err := s.Write(id, line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	out := waitForLastOutput(t, s, id, 15*time.Second)
+	if !strings.Contains(out.Text, "not recognized") {
+		t.Errorf(
+			"captured output for a non-existent command = %q, want it to contain %q (raw dump for diagnosis: %q)",
+			out.Text, "not recognized", out.Text,
+		)
+	}
+	if out.ExitCode == 0 {
+		t.Errorf("ExitCode = 0 for a non-existent command, want non-zero")
+	}
+}

@@ -41,6 +41,27 @@ func TestCaptureScan_NonZeroExitCode(t *testing.T) {
 	}
 }
 
+// TestCaptureScan_FailingCommandWithErrorTextIsCaptured reproduces the
+// "copy last output copies blank lines for a failed command" bug: a pwsh
+// error record's rendering ends each line in a bare CR (collapsed from a
+// ConPTY repaint), which stripANSI's old "everything after the last \r"
+// rule reduced to "" per line, wiping the error text while still reporting
+// lastValid=true. See collapseCarriageReturns in ansi.go.
+func TestCaptureScan_FailingCommandWithErrorTextIsCaptured(t *testing.T) {
+	ss := newCaptureTestSession()
+	errBlock := "\x1b[31;1mThe term 'x' is not recognized.\x1b[0m\r\r\n" +
+		"\x1b[31;1mCheck the spelling.\x1b[0m\r\r\n"
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07" + errBlock + "\x1b]133;D;test-nonce;1\x07"))
+
+	want := "The term 'x' is not recognized.\nCheck the spelling.\n"
+	if ss.lastOutput != want {
+		t.Errorf("lastOutput = %q, want %q", ss.lastOutput, want)
+	}
+	if ss.lastExitCode != 1 {
+		t.Errorf("lastExitCode = %d, want 1", ss.lastExitCode)
+	}
+}
+
 func TestCaptureScan_STTerminator(t *testing.T) {
 	ss := newCaptureTestSession()
 	ss.captureScan([]byte("\x1b]133;C;test-nonce\x1b\\hi\x1b]133;D;test-nonce;0\x1b\\"))

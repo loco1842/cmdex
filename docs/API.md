@@ -582,11 +582,15 @@ Returns the exact output of the most recently completed command in the session, 
 
 ```typescript
 const last: TerminalLastOutput = await GetLastOutput(session.id);
-if (last.available) {
+if (last.available && last.text.trim() !== '') {
   await navigator.clipboard.writeText(last.text);
 } else {
-  // Shell has no integration (or none has completed yet) — fall back to
-  // scraping the xterm buffer.
+  // Shell has no integration, none has completed yet, or the capture came
+  // back blank — fall back to scraping the xterm buffer. `available: true`
+  // with empty/whitespace-only `text` is a real, reachable state (e.g. a
+  // stale "D" marker with no preceding "C"), not just the no-integration
+  // case — treating `available` alone as "trust this" was what let "Copy
+  // last output" silently copy nothing/blank lines for a failed command.
 }
 ```
 

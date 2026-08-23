@@ -194,7 +194,8 @@
     "maxSessionsReached": "Maximum number of terminal sessions ({{limit}}) reached. Close a session to create a new one.",
     "outputCopied": "Output copied",
     "outputCopiedTruncated": "Output copied (truncated)",
-    "outputCopyFailed": "Failed to copy"
+    "outputCopyFailed": "Failed to copy",
+    "outputEmpty": "Nothing to copy"
   },
   "settings": {
     "title": "Settings",

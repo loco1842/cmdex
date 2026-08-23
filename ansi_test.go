@@ -141,6 +141,39 @@ func TestStripANSI(t *testing.T) {
 			cols: 80,
 			want: "café \xc3\xa9clair",
 		},
+		{
+			// Regression: a trailing bare CR (nothing written after it) must
+			// not wipe the line it terminates. This is the exact shape
+			// PowerShell 7's error rendering produces under ConPTY, and was
+			// silently reducing "copy last output" for a failed command to
+			// blank lines.
+			name: "trailing bare CR keeps the line instead of wiping it",
+			in:   "The term 'x' is not recognized.\r",
+			cols: 80,
+			want: "The term 'x' is not recognized.",
+		},
+		{
+			// The real pwsh shape: two SGR-colored lines, each ending in a
+			// CRLF pair with an extra leading bare CR (ConPTY's own repaint,
+			// collapsed to one CR by the '\r\n' -> '\n' normalization run
+			// earlier in stripANSI). Both lines must survive intact.
+			name: "pwsh command-not-found error block survives across two lines",
+			in:   "\x1b[31;1mThe term 'x' is not recognized.\x1b[0m\r\r\n\x1b[31;1mCheck the spelling.\x1b[0m\r\r\n",
+			cols: 80,
+			want: "The term 'x' is not recognized.\nCheck the spelling.\n",
+		},
+		{
+			name: "multiple CRs on one line pick the last non-empty segment",
+			in:   "line1\r\rline2",
+			cols: 80,
+			want: "line2",
+		},
+		{
+			name: "a line made only of CRs collapses to empty",
+			in:   "\r\r\r",
+			cols: 80,
+			want: "",
+		},
 	}
 
 	for _, tt := range tests {
