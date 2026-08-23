@@ -29,7 +29,7 @@ Triggers on every push or pull request to `main`.
 
 - **Type Check Job** (`ubuntu-latest`)
   - Installs Go (version from `go.mod`), Node.js 24, pnpm, and Linux build dependencies (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`).
-  - Installs Wails v3 CLI (`v3.0.0-beta.8`).
+  - Installs Wails v3 CLI (`v3.0.0-beta.12`).
   - Generates Wails bindings and runs `pnpm tsc --noEmit`.
   - Runs `go build ./...` to verify compilation.
 
@@ -70,12 +70,12 @@ Steps:
 - **Go** `>= 1.26.0`
 - **Node.js** `24`
 - **pnpm**
-- **Wails v3 CLI** `v3.0.0-beta.8`
+- **Wails v3 CLI** `v3.0.0-beta.12`
 - **Task** (`taskfile.dev`) `3.x`
 
 Install the Wails CLI:
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.12
 ```
 
 ### Install Dependencies

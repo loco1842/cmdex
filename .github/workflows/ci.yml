@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 env:
-  WAILS_VERSION: v3.0.0-beta.8
+  WAILS_VERSION: v3.0.0-beta.12
   NODE_VERSION: '24'
   PNPM_VERSION: '11'
 

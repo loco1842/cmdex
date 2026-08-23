@@ -406,7 +406,7 @@ Test execution **is part of the CI pipeline**. The CI configuration lives at `.g
 > Note that CI runs `go test -race`, while `make test` runs plain `go test`. A data race in the terminal session code can therefore pass locally and fail in CI — run `go test -race ./...` yourself when touching `terminal_service.go` or `terminal_capture.go`.
 
 **Key CI details:**
-- Wails CLI version: `v3.0.0-beta.8` (pinned via `WAILS_VERSION` env var in CI)
+- Wails CLI version: `v3.0.0-beta.12` (pinned via `WAILS_VERSION` env var in CI)
 - Go version: read from `go.mod` (currently `1.26.0`)
 - Node version: `24` (pinned via `NODE_VERSION` env var in CI)
 - Package manager: `pnpm` 11 (pinned via `PNPM_VERSION`; installed with `pnpm/action-setup@v6`)

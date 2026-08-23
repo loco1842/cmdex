@@ -13,14 +13,14 @@ This guide covers how to set up, build, and develop the **Cmdex** application lo
 | Go | `>= 1.26.0` | Backend services and Wails runtime |
 | Node.js | `>= 20.19.0 || >=22.13.0 || >=24` | Frontend build tooling (Vite, TypeScript) |
 | pnpm | latest | Frontend package manager |
-| Wails CLI | `v3.0.0-beta.8` | Desktop app framework and binding generator |
+| Wails CLI | `v3.0.0-beta.12` | Desktop app framework and binding generator |
 
 ### Installing Wails v3
 
 Install the pinned version — it must match `WAILS_VERSION` in `.github/workflows/ci.yml`/`release.yml`; a mismatched version can cause binding generation failures (see `docs/GETTING-STARTED.md`).
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.12
 ```
 
 Ensure `$GOPATH/bin` (or `$HOME/go/bin`) is on your `PATH` so the `wails3` command is available.

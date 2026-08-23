@@ -9,7 +9,7 @@ Commands run in a real **PTY-backed terminal** embedded in the app (xterm.js on 
 ## Prerequisites
 
 - Go 1.26+ (see `go.mod`)
-- Wails v3 CLI, pinned to `v3.0.0-beta.8` (see `.github/workflows/ci.yml`'s `WAILS_VERSION`): `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8`
+- Wails v3 CLI, pinned to `v3.0.0-beta.12` (see `.github/workflows/ci.yml`'s `WAILS_VERSION`): `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.12`
 - Node.js 24+ with pnpm (frontend package manager; see `frontend/package.json`, `build/config.yml`)
 - `wails.json` at the repo root is a leftover Wails v2 config file and is not read by the v3 toolchain — project config lives in `build/config.yml`
 

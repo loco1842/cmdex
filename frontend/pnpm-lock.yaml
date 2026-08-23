@@ -27,8 +27,8 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0))
       '@wailsio/runtime':
-        specifier: 3.0.0-beta.8
-        version: 3.0.0-beta.8
+        specifier: 3.0.0-beta.12
+        version: 3.0.0-beta.12
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -1451,8 +1451,8 @@ packages:
       babel-plugin-react-compiler:
         optional: true
 
-  '@wailsio/runtime@3.0.0-beta.8':
-    resolution: {integrity: sha512-c9PZJcOR9z1a6cxtBS2q5cygNajlxDE8Oxv/vvcTFYRbZSoOGBszq4uzlkPTOd0Bot1xkM81jnpaBgKWRpBh2g==}
+  '@wailsio/runtime@3.0.0-beta.12':
+    resolution: {integrity: sha512-2B456rspX5rDXYhNjRqXNDOPkRXjletGJ4R3beF2FGs7K67MTovLy9acXHYb8nolzL96kygyJ622RIjB45oumg==}
 
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
@@ -3526,7 +3526,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)
 
-  '@wailsio/runtime@3.0.0-beta.8': {}
+  '@wailsio/runtime@3.0.0-beta.12': {}
 
   '@xterm/addon-fit@0.11.0': {}
 

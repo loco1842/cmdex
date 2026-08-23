@@ -36,13 +36,13 @@ We accept pull requests for bug fixes and features. If you're planning a signifi
 - **Go** `>= 1.26.0`
 - **Node.js** `>=20.19.0 \|\| >=22.13.0 \|\| >=24`
 - **pnpm** (latest)
-- **Wails v3 CLI** `v3.0.0-beta.8`
+- **Wails v3 CLI** `v3.0.0-beta.12`
 - **Task** (`go-task`) — optional but recommended for builds
 
 ### Installing Wails v3 CLI
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.12
 ```
 
 ### Clone & Install
