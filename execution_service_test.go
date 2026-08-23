@@ -453,6 +453,16 @@ func TestBuildCommandLine(t *testing.T) {
 			"cmd multiline", cmdExe, "line1\nline2", `D:\work`,
 			`cd /d "D:\work" && line1` + "\rline2\r",
 		},
+		{
+			// cmd.exe expands %VAR% even inside double quotes, so a
+			// workingDir of "%windir%" would silently cd somewhere other
+			// than the literal string shown in the UI. % has no working
+			// escape at the interactive prompt (the %% doubling trick only
+			// applies inside batch files), so it is stripped instead — same
+			// treatment as ", just for a different reason.
+			"cmd wd with percent has it stripped to prevent var expansion", cmdExe, "echo hi", `C:\Users\test\%windir%`,
+			`cd /d "C:\Users\test\windir" && echo hi` + "\r",
+		},
 		{"bare cmd with no extension", "cmd", "echo hi", "", "echo hi\r"},
 		{"case-insensitive CMD.EXE", `C:\Windows\System32\CMD.EXE`, "echo hi", "", "echo hi\r"},
 		{"unix-style pwsh path", "/usr/local/bin/pwsh", "echo hi", "", "echo hi\r"},

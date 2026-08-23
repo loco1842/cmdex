@@ -142,12 +142,26 @@ func (d shellDialect) cdPrefix(dir string) string {
 	return "cd " + shellQuoteDir(dir) + " && "
 }
 
-// cmdQuoteDir wraps dir in double quotes for cmd.exe, which has no escape
-// mechanism inside them and needs none: " is not a legal character in a
-// Windows path, so the strip below is purely defensive against a value
-// that could not have come from a real directory.
+// cmdQuoteDir wraps dir in double quotes for cmd.exe. " is stripped first —
+// it is not a legal character in a Windows path, so this is purely
+// defensive against a value that could not have come from a real directory.
+//
+// % is stripped for a different reason: unlike every other special
+// character, cmd.exe expands %VAR% references even inside double quotes —
+// quoting does not make them literal. A workingDir of "%windir%" changes
+// directory to wherever that variable points instead of failing, silently
+// running the rest of the line somewhere other than the configured
+// directory. There is no in-band way to escape a literal % for cmd.exe
+// short of not being in a batch file (the usual %% doubling trick only
+// applies inside one), so unlike " this can't be solved by quoting or
+// doubling — removing every % guarantees no %...% pair can ever form from
+// this value, at the cost of a working directory that legitimately
+// contains a % losing that character (cd then fails closed rather than
+// landing somewhere unintended).
 func cmdQuoteDir(dir string) string {
-	return `"` + strings.ReplaceAll(dir, `"`, "") + `"`
+	dir = strings.ReplaceAll(dir, `"`, "")
+	dir = strings.ReplaceAll(dir, "%", "")
+	return `"` + dir + `"`
 }
 
 // psQuoteDir wraps dir in a PowerShell single-quoted string, whose only
