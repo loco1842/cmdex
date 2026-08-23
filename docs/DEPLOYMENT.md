@@ -1,5 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # Deployment Guide
 
 This document describes how CmDex is built, packaged, and released across macOS, Windows, Linux, and (experimentally) iOS.

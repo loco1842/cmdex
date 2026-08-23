@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', '.planning/**']
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
     branches: [main]
     # No paths-ignore here: GitHub does not synthesize a status for a

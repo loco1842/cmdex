@@ -1,5 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # Development Guide
 
 This guide covers how to set up, build, and develop the **Cmdex** application locally.
@@ -46,17 +44,25 @@ cmdex/
 ├── main.go                    # Application entry point; window & menu setup
 ├── app.go                     # App lifecycle, settings window management
 ├── models.go                  # Go structs (Command, Category, VariableDefinition, etc.)
-├── command_service.go         # CRUD for commands and categories
-├── execution_service.go       # Command runner and execution history
+├── command_service.go         # CRUD for commands, categories, presets; FTS search
+├── execution_service.go       # Resolves variables, dispatches the command to the active PTY
 ├── settings_service.go        # User preferences persistence
 ├── importexport_service.go    # Data import / export
-├── event_service.go           # Wails event definitions
-├── executor.go                # Script execution engine (os/exec wrapper)
+├── event_service.go           # Wails event name constants
+├── terminal_service.go        # Multi-session PTY terminals (MaxSessions = 10)
+├── pty_backend*.go            # PTY abstraction: creack/pty (Unix), ConPTY (Windows), mock
+├── pty_env.go                 # TERM/COLORTERM/LANG for launchd-started GUI processes
+├── shell_integration.go       # OSC 133 activation via embedded shell startup scripts
+├── terminal_capture.go        # OSC 133 marker scanner; GetLastOutput
+├── ansi.go                    # ANSI stripping + ConPTY wrap-artifact removal
+├── executor.go                # Shell selection, shebang/quoting helpers, CEL eval
 ├── db.go                      # SQLite database layer
 ├── script.go                  # Script parsing and variable substitution
-├── wails.json                 # Wails project configuration
+├── migrations/                # Versioned schema migrations (0001…0010)
+├── shell-integration/         # Embedded bash / zsh / fish / pwsh startup scripts
+├── wails.json                 # Stale Wails v2 leftover — not read by the v3 toolchain
 ├── frontend/
-│   ├── package.json           # Frontend manifest (React 19, Vite 7, Tailwind v4)
+│   ├── package.json           # Frontend manifest (React 19, Vite 8, Tailwind v4)
 │   ├── vite.config.ts         # Vite configuration with Wails plugin
 │   ├── src/
 │   │   ├── main.tsx           # Entry point (routes between main app and settings window)
@@ -74,9 +80,11 @@ cmdex/
 
 **Key files to know:**
 
-- `main.go` — Defines the main window dimensions, menu bar, and wires up all backend services.
-- `app.go` — Holds `ServiceStartup` / `ServiceShutdown`; creates the settings popup window.
-- `frontend/src/App.tsx` — Central hub for application state, tab management, and modal routing.
+- `main.go` — Defines the main window dimensions, menu bar, and registers all seven backend services.
+- `app.go` — Holds `ServiceStartup` / `ServiceShutdown`, creates the settings window, and owns the package-level `db` / `executor` / `terminalSvc` / `wailsApp` variables every other service reads.
+- `execution_service.go` — Where "run a command" actually lives. Note that it dispatches into the terminal rather than executing anything itself; `executor.go`, despite the name, executes nothing.
+- `terminal_service.go` — The largest and most subtle file: session lifecycle, PTY read loops, and the concurrency rules around `sessionState`.
+- `frontend/src/App.tsx` — Central hub for application state, tab management, terminal sessions, and modal routing.
 - `frontend/src/types.ts` — Single source of truth for TypeScript shapes that mirror Go structs.
 
 ---
@@ -85,7 +93,7 @@ cmdex/
 
 ### Vite Dev Server
 
-The frontend is built with **Vite 7** and uses the official `@wailsio/runtime` plugin.
+The frontend is built with **Vite 8** and uses the official `@wailsio/runtime` plugin.
 
 ```bash
 cd frontend
@@ -137,12 +145,13 @@ Cmdex uses Wails v3 **Services**. Each service is a struct registered in `main.g
 
 | Service | File | Responsibility |
 |---------|------|----------------|
-| `App` | `app.go` | Lifecycle, settings window |
-| `CommandService` | `command_service.go` | CRUD for categories & commands |
-| `ExecutionService` | `execution_service.go` | Running commands, history |
+| `App` | `app.go` | Lifecycle, settings window, `GetOS`, `PickDirectory` |
+| `CommandService` | `command_service.go` | CRUD for categories, commands, presets; FTS search |
+| `ExecutionService` | `execution_service.go` | Variable resolution, working dir, dispatching to the active PTY |
 | `SettingsService` | `settings_service.go` | Read/write user preferences |
 | `ImportExportService` | `importexport_service.go` | JSON import / export |
 | `EventService` | `event_service.go` | Event name constants |
+| `TerminalService` | `terminal_service.go` | Multi-session PTY terminals, output capture |
 
 All services receive a `ServiceStartup` context for initialization and `ServiceShutdown` for cleanup.
 
@@ -162,7 +171,8 @@ This updates `frontend/bindings/` so the frontend can call the new Go methods wi
 
 - SQLite via `modernc.org/sqlite` (pure Go, no CGO).
 - Data is stored in the user's home directory at `~/.cmdex/cmdex.db`.
-- See `db.go` for schema and query logic.
+- See `db.go` for query logic and the migration runner; the migrations themselves live in the `migrations/` package.
+- Schema changes need a new `migrations/NNNN_description.go` appended to the ordered `Migrations` slice. SQLite has no `ALTER COLUMN`, so most migrations recreate the table and then rebuild the FTS index and triggers. During local development you can instead delete `~/.cmdex/cmdex.db`.
 
 ---
 
@@ -213,18 +223,20 @@ React Component
   Response → React State Update
 ```
 
-For streaming output (e.g., command execution), the backend emits events via `wailsApp.Event.Emit(...)` and the frontend listens with `Events.On(...)`.
+For streaming data, the backend emits events via `wailsApp.Event.Emit(...)` and the frontend listens with `Events.On(...)`. Command output does not follow the request/response path above at all: `RunCommand` writes the resolved line into the active terminal session's PTY, and the output arrives asynchronously on that session's `pty-output:<sessionId>` event, straight into xterm.js.
 
 ### Adding a New Field to a Model
 
 When adding a field to `Command`, `Category`, or any shared model:
 
 1. Update the Go struct in `models.go`.
-2. Update the corresponding TypeScript interface in `frontend/src/types.ts`.
+2. Add a migration in `migrations/` and update the CRUD logic and queries in `db.go`.
 3. Update `Create` and `Update` method signatures in the relevant service (e.g., `command_service.go`).
-4. Update the CRUD logic and database queries in `db.go`.
-5. Update the UI components (`CommandDetail.tsx`, `CategoryEditor.tsx`) to display/edit the field.
-6. Update `App.tsx` where Create/Update calls are invoked.
+4. Run `wails3 generate bindings` and commit the regenerated `frontend/bindings/`.
+5. Update the corresponding TypeScript interface in `frontend/src/types.ts`.
+6. If the field is editable per tab, extend `TabDraft` and the helpers in `frontend/src/utils/tabDraft.ts` — otherwise dirty-state detection will ignore it.
+7. Update the UI components (`CommandDetail.tsx`, `CategoryEditor.tsx`) to display/edit the field.
+8. Update `App.tsx` where Create/Update calls are invoked.
 
 ### Window Configuration
 
@@ -236,8 +248,8 @@ Main window dimensions, title, background color, and macOS-specific options are 
 
 ### Go
 
-- Standard Go formatting. Run `make fmt` (`golangci-lint fmt`) before committing; it rewrites files in place using the formatters configured under `.golangci.yml`'s `formatters:` block (`goimports`, `golines`).
-- `make lint` (`golangci-lint run`, using `.golangci.yml`) reports style/correctness issues — same config CI runs, and both fail the run on any finding. Not wired into `make check`.
+- Standard Go formatting. Run `make fmt` before committing: it applies `golangci-lint fmt` (the formatters under `.golangci.yml`'s `formatters:` block — `goimports`, `golines`) to Go **and** `pnpm lint:fix` to the frontend.
+- `make lint` runs `golangci-lint run` **and** `pnpm lint` — the same configs CI runs, and both fail the run on any finding. Not wired into `make check`. Use `make lint-fix` to auto-fix what each tool can.
 - Services are named `XxxService` with exported methods in PascalCase.
 - Errors are wrapped with `fmt.Errorf("...: %w", err)`.
 - Database access is centralized in `db.go`; services call `db.*` rather than issuing SQL directly.
@@ -275,8 +287,9 @@ The project uses Tailwind v4 with the new `@tailwindcss/vite` plugin. Styles are
 | `make build` | Alias for `wails3 build` |
 | `make generate` | Alias for `wails3 generate bindings` |
 | `make check` | Compile Go + type-check TypeScript |
-| `make fmt` | Rewrite Go files with `golangci-lint fmt` (`goimports` + `golines`) |
-| `make lint` | Run `golangci-lint run` (blocking — same config CI uses; fails on findings) |
+| `make fmt` | `golangci-lint fmt` (`goimports` + `golines`) **+** `pnpm lint:fix` |
+| `make lint` | `golangci-lint run` **+** `pnpm lint` (blocking — same configs CI uses) |
+| `make lint-fix` | `golangci-lint run --fix` **+** `pnpm lint:fix` |
 | `make test` | Run Go tests (`go test ./...`), then the frontend Playwright e2e suite |
 | `make clean` | Remove `bin/` and `frontend/dist`, then restore the tracked `frontend/dist/.gitkeep` placeholder |
 

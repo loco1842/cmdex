@@ -19,12 +19,13 @@ wails3 build                            # or: make build  or: task build
 # Full checks (run before committing)
 make check                              # go build ./... && cd frontend && pnpm tsc --noEmit
 
-# Go formatting + lint (not wired into `make check`; lint is blocking in CI —
-# both this and `pnpm lint` fail the run on any finding)
-make fmt                                # golangci-lint fmt (rewrites files: goimports + golines)
-make lint                               # golangci-lint run (same config CI uses)
+# Format + lint (not wired into `make check`; blocking in CI on any finding).
+# Both targets cover Go *and* the frontend.
+make fmt                                # golangci-lint fmt (goimports + golines) + pnpm lint:fix
+make lint                               # golangci-lint run + pnpm lint (same configs CI uses)
+make lint-fix                           # golangci-lint run --fix + pnpm lint:fix
 
-# Frontend lint + fix
+# Frontend lint on its own
 cd frontend && pnpm lint                # pnpm lint:fix for auto-fix
 
 # Go tests
@@ -37,7 +38,7 @@ cd frontend && pnpm test:e2e
 make test
 ```
 
-**Note:** The Makefile targets `make dev/build/generate/check/fmt/lint/test/clean` exist. `make clean` removes `bin/` (the real build output dir) and `frontend/dist/`, then restores the tracked `frontend/dist/.gitkeep` placeholder that `//go:embed all:frontend/dist` in `main.go` requires to exist. The Taskfile (`task dev`, `task build`) provides more options (Docker cross-compile, server mode). Both call `wails3` under the hood.
+**Note:** The Makefile targets `make dev/build/generate/check/fmt/lint/lint-fix/test/clean` exist. `make check`, `make test`, and `make clean` all `mkdir -p frontend/dist` so the `//go:embed all:frontend/dist` directive in `main.go` always has something to embed; `make clean` also restores the tracked `frontend/dist/.gitkeep` placeholder after removing `bin/` (the real build output dir) and `frontend/dist/`. The Taskfile (`task dev`, `task build`) provides more options (Docker cross-compile, server mode). Both call `wails3` under the hood.
 
 ## Architecture (Wails v3)
 
@@ -55,7 +56,7 @@ In `main.go`, seven services are registered as `application.Service`:
 | `EventService` | `event_service.go` | `../bindings/cmdex/eventservice` |
 | `TerminalService` | `terminal_service.go` (+ `pty_backend*.go`) | `../bindings/cmdex/terminalservice` |
 
-Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates TypeScript bindings from exported methods into `frontend/bindings/cmdex/<servicename>/`. **Never hand-edit `frontend/bindings/`** — it's generated output, but it **is** committed (so a fresh clone type-checks without the Wails CLI installed); regenerate with `wails3 generate bindings` and commit the result alongside the Go change that caused it.
+Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates bindings from exported methods into `frontend/bindings/cmdex/<servicename>.js` (JS with JSDoc types, plus `models.js` and a barrel `index.js`). **Never hand-edit `frontend/bindings/`** — it's generated output, but it **is** committed (so a fresh clone type-checks without the Wails CLI installed); regenerate with `wails3 generate bindings` and commit the result alongside the Go change that caused it.
 
 ### Adding a new feature
 
@@ -71,7 +72,7 @@ Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wail
 ### Adding a new field to Command or Category
 
 1. Update the struct in `models.go`.
-2. Update SQL schema (add migration in `migrations/` package if persistent; or bump version + update `db.go` schema DDL).
+2. Add a migration in the `migrations/` package and append it to the ordered `Migrations` slice in `migration.go` (during dev you can instead delete `~/.cmdex/cmdex.db`).
 3. Update `db.go` CRUD queries and scan helpers.
 4. Update the service method signatures in the relevant `*_service.go` file.
 5. Run `wails3 dev` to regenerate bindings.
@@ -81,14 +82,27 @@ Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wail
 
 ### Event system
 
-Events bridge Go and the frontend. Event names are defined in `event_service.go` (`EventNames` struct) and consumed in the frontend via `@wailsio/runtime`:
+Events bridge Go and the frontend. There are two kinds.
+
+**Named events** — declared in `event_service.go`'s `EventNames` struct, fetched once by the frontend via `GetEventNames()` (see `frontend/src/wails/events.ts`) so no event string is hardcoded:
+
+| Field | Event | Emitted by |
+|---|---|---|
+| `openSettings` | `open-settings` | native menu |
+| `openShortcuts` | `open-shortcuts` | native menu (`main.go`) |
+| `settingsChanged` | `settings-changed` | frontend, after a settings write |
+| `settingsWindowClosing` | `settings-window-closing` | `app.go` window hook |
+
+**Per-session terminal events** — built by string concatenation in `terminal_service.go`, *not* part of `EventNames`, so they must be subscribed per session ID:
 
 ```ts
 import { Events } from '@wailsio/runtime';
-Events.On('cmd-output', handler);
+Events.On(`pty-output:${sessionId}`, handler);   // { data: string } — raw PTY bytes
+Events.On(`pty-exit:${sessionId}`, handler);     // { exitCode: number, wasIntentional: boolean }
+Events.On(`pty-cleared:${sessionId}`, handler);  // no payload
 ```
 
-Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming execution output uses `cmd-output` events batched with `requestAnimationFrame`.
+`Terminal.tsx` feeds `pty-output` straight into xterm.js. **There is no `cmd-output` event** — command output no longer flows through a Go-side streaming callback at all.
 
 ## Key Files & Responsibilities
 
@@ -96,20 +110,30 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 |---|---|
 | `main.go` | Entry point, service registration, native menus, window config |
 | `app.go` | App lifecycle (`ServiceStartup`/`Shutdown`), settings window management; `db` and `executor` are package-level vars initialized here |
-| `command_service.go` | Category + Command CRUD bound methods |
-| `execution_service.go` | `RunCommand`, `RunInTerminal`, `GetVariables`, execution history |
-| `settings_service.go` | `GetSettings`, `SetSettings` |
+| `command_service.go` | Category + Command CRUD, presets, reordering, FTS search, `ResetAllData` |
+| `execution_service.go` | `GetVariables` (CEL defaults), `RunCommand`, working-directory resolution |
+| `settings_service.go` | `GetSettings`, `SetSettings` (settings are one JSON blob) |
 | `importexport_service.go` | Import/export commands, theme templates |
 | `event_service.go` | `GetEventNames` — exposes event name strings to frontend |
 | `db.go` | SQLite access, schema DDL, migrations runner, FTS5 search, all SQL queries |
 | `models.go` | Go domain types for Wails/JSON and SQL scanning |
-| `script.go` | `{{var}}` parsing, shebang wrapping, template substitution (pure functions) |
-| `executor.go` | Subprocess execution, temp scripts, CEL default evaluation, terminal detection/launch |
+| `script.go` | `{{var}}` parsing and substitution, shebang *stripping* (pure functions, no I/O) |
+| `executor.go` | Shell selection, `stripShebang`, `shellQuoteDir`, CEL default evaluation. **Executes nothing** |
+| `terminal_service.go` | `TerminalService`: multi-session PTY terminals, `MaxSessions = 10` |
+| `pty_backend*.go` | PTY abstraction per platform: `creack/pty` (Unix), `charmbracelet/x/conpty` (Windows), plus a mock for tests |
+| `pty_env.go` | `buildPtyEnv` — supplies `TERM`/`COLORTERM`/`LANG` that launchd-started GUI apps don't inherit |
+| `shell_integration.go` | Materializes embedded `shell-integration/` scripts to `~/.cmdex`; activates OSC 133 markers via a per-session nonce |
+| `terminal_capture.go` | OSC 133 `C`/`D` marker scanner; `GetLastOutput` for exact last-command output |
+| `ansi.go` | ANSI/CSI stripping, including removal of ConPTY's injected line-wrap artifacts |
 | `migrations/` | Versioned migration files (`0001_initial.go` … `0010_working_dir.go`), `migration.go` defines the ordered `Migrations` slice |
-| `frontend/src/App.tsx` | Central state: tabs, modals (discriminated union `ModalState`), data loading, event subscriptions |
+| `shell-integration/` | Embedded bash/zsh/fish/pwsh startup scripts that emit the OSC 133 markers |
+| `frontend/src/App.tsx` | Central state: tabs, modals (discriminated union `ModalState`), terminal sessions, data loading, event subscriptions |
+| `frontend/src/components/Terminal.tsx` | xterm.js host; subscribes to the session's `pty-*` events |
 | `frontend/src/types.ts` | TS mirrors of Go domain types |
+| `frontend/src/utils/tab.ts` | Tab ID helpers (`isNewCommandTabId`, `createNewTabId`) and `getCommandDisplayTitle` |
 | `frontend/src/utils/tabDraft.ts` | Tab draft/baseline state and dirty comparison |
 | `frontend/src/utils/templateVars.ts` | Variable detection and merging for UI |
+| `frontend/src/lib/theme-apply.ts` | `applyTheme`/`applyDensity`/`applyFonts` — write CSS custom properties |
 | `frontend/src/hooks/useKeyboardShortcuts.ts` | Global keyboard shortcuts |
 
 ## Data & Storage
@@ -118,8 +142,17 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 - Commands use `{{variableName}}` template syntax (double braces).
 - Variables auto-detected from `{{var}}` patterns; can also be added manually.
 - Variable defaults support CEL expressions: `now()`, `env("KEY")`, `date("2006-01-02")`.
-- Scripts stored with `#!/bin/bash` shebang; editor shows the body without it.
+- **Scripts are stored without a shebang.** `GenerateScript` only trims and adds a trailing newline; `ParseScriptBody`/`stripShebang` strip a leading `#!` line for backward compatibility with older DB records.
+- Settings are a single JSON blob in one `app_settings` row (migration 0009), not a column per setting.
 - `commands.category_id` is nullable + `ON DELETE SET NULL` (deleting a category uncategorizes its commands).
+
+## How a command runs
+
+`ExecutionService.RunCommand` resolves `{{vars}}`, strips any shebang, optionally prefixes `cd '<dir>' && ` (only when a working directory is configured for the current OS), then **writes the line to the active terminal session's PTY** via `terminalSvc.Write`. Output streams back over `pty-output:<id>` into xterm.js; `RunCommand` captures nothing and persists no history. Ctrl+C works because the PTY has a real foreground process group.
+
+With no active session, it returns an `ExecutionRecord` with `ExitCode: -1` and an `Error` string rather than rejecting.
+
+Removed along the way — do not reintroduce references to them: `RunInTerminal`, `GetExecutionHistory`, `ClearExecutionHistory`, `GetAvailableTerminals`, the `TerminalInfo` model, the `terminal` setting, and the `OutputPane`/`HistoryPane` components.
 
 ## Schema Migrations
 
@@ -134,13 +167,16 @@ Frontend fallback/initialization in `frontend/src/wails/events.ts`. Streaming ex
 - `category_id` in commands is nullable — use `sql.NullString` for Go scanning; `NULL` means uncategorized.
 - `frontend/tsconfig.json` has `strict: false`. Don't assume strict-mode enforcement.
 - Mixed punctuation in frontend: `App.tsx` and most components use semicolons + single quotes; `ui/` components use double quotes + no semicolons. Match the file you're editing.
-- Per-tab execution output is stored in refs (`tabOutputRef`, `tabPaneStateRef`) not React state — using state causes re-render loops. Restore with `applyPaneState(tabId)` on tab switch.
+- Editor tabs stay mounted when inactive (`CommandDetailTab` toggles `display`, it doesn't unmount), so don't rely on unmount cleanup for tab state.
+- The terminal is **one shared bottom panel** with its own session tabs, not per-editor-tab output. Older docs described `tabOutputRef`/`tabPaneStateRef`/`applyPaneState` — all removed.
 - Themes use CSS variables in `frontend/src/style.css` — modify variables, not hardcoded colors.
-- The output pane does not support interactive shells or full ANSI rendering.
+- Terminal event names are per session (`pty-output:<id>`), so subscribe only once you have the session ID and clean up on close.
+- `AppSettings.ShellIntegration` changes apply to **newly started sessions only**, never to running ones.
 
 ## Tests
 
 - Go: `db_test.go` — three migration tests (`TestFreshDBMigrations`, `TestExistingDBIdempotent`, `TestRollbackTo`). Run with `go test ./...`.
+- Go: `execution_service_test.go` (working-dir resolution, `FinalCmd` construction), `terminal_capture_test.go` + `ansi_test.go` + `shell_integration_test.go` (OSC 133 capture, ANSI/ConPTY wrap-artifact stripping, script materialization), `pty_env_test.go`.
 - Go: `terminal_service_test.go` + `terminal_service_stress_test.go` + `terminal_service_max_sessions_test.go` — multi-session CRUD, cwd inheritance, 100-cycle stress test, and MaxSessions limit test. Stress and max-sessions tests are `//go:build darwin` (use the mock backend from `pty_backend_mock_test.go`).
 - **Windows PTY backend is real**, backed by `github.com/charmbracelet/x/conpty` (`pty_backend_windows.go`; `conptyBackend`/`conptyProcess`/`conptyHandle`). A dedicated `test-windows` CI job (`.github/workflows/ci.yml`) runs the full Go test suite on `windows-latest`, including `pty_backend_windows_test.go` (real-backend integration tests: write→read round-trip, process termination verification, bad-working-dir fallback, dimension validation) and `pty_backend_windows_conpty_spike_test.go` (lower-level tests against the raw conpty library, kept as narrower regression coverage independent of the `TerminalService` integration layer). `TestTerminalShutdown`/`TestTerminalExit` (call the raw `ptyStart` helper with Unix shell syntax) and `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` (assert an exact POSIX-quoted `cd '<dir>' && ...` string) remain Windows-skipped for reasons unrelated to backend support — see "Known cross-platform gaps" below.
 - Frontend: Playwright e2e tests under `frontend/e2e/tests/*.spec.ts` (commands, categories, themes, smoke test). Run with `cd frontend && pnpm test:e2e`, or `make test` which runs `go test ./...` first and then the e2e suite. `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by hardcoding each generated binding's numeric `$Call.ByID` method hash — if you regenerate bindings and IDs shift, update this mock's handler table or tests fail silently with `[e2e mock] no handler for method ID …` console warnings.
@@ -191,6 +227,5 @@ Do not run the whole `release.yml` (omitting `-j build`) with a repo-write-scope
 
 ## References
 
-- `docs/` — Human-authored docs: GETTING-STARTED.md, DEVELOPMENT.md, ARCHITECTURE.md, CONFIGURATION.md, DEPLOYMENT.md, TESTING.md, API.md
-- `.planning/codebase/` — Auto-generated analysis: ARCHITECTURE.md, STACK.md, CONVENTIONS.md, CONCERNS.md, INTEGRATIONS.md, STRUCTURE.md, TESTING.md
-- `CLAUDE.md` — Additional agent context (some sections may lag behind Wails v3 migration)
+- `CLAUDE.md` — The fullest agent-facing reference: architecture, execution flow, terminal/shell-integration internals, migration pattern, conventions
+- `docs/` — GETTING-STARTED.md, DEVELOPMENT.md, ARCHITECTURE.md, CONFIGURATION.md, DEPLOYMENT.md, TESTING.md, API.md

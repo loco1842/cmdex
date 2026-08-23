@@ -1,3 +1,0 @@
-- Remove the edit command tab, do this instead:
-  - 1 command have their own main tab section
-  - user can edit anything in main tab by double click on the input (eg: title, description, tags, script body)

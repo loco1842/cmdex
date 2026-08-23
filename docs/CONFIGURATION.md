@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Configuration
 
 Cmdex stores all user preferences and application data locally. This document describes every configurable aspect of the application, where settings are stored, and their default values.
@@ -11,7 +10,7 @@ User preferences are managed centrally through the **Settings** modal, accessibl
 
 - **Appearance** — Themes, layout density, and custom theme import
 - **Typography** — UI font and editor/monospace font selection
-- **General** — Language/locale, terminal emulator, and data reset
+- **General** — Language/locale, default working directory, shell integration, and data reset
 
 Settings are persisted automatically to the local SQLite database when changed.
 
@@ -55,18 +54,23 @@ Controls the spacing and compactness of the UI.
 
 ## 3. Terminal Settings
 
-The **Terminal** setting determines which terminal emulator is used when running a command via **"Run in Terminal"**.
+Cmdex runs commands in its own **built-in PTY-backed terminal** (xterm.js on the frontend, `TerminalService` on the backend). There is no external-terminal-emulator preference: the old `terminal` setting and the "Run in Terminal" feature were both removed when execution moved into the embedded terminal.
 
-- **Auto-detect** (default): The application automatically detects available terminal emulators on the system.
-- **Manual selection**: Users can choose from a list of detected terminals.
+The shell used for each session is chosen by the backend — `$SHELL` on macOS/Linux (falling back to `/bin/sh`), `cmd` on Windows.
 
-Detected terminals are platform-specific:
+Up to **10** terminal sessions (`MaxSessions` in `terminal_service.go`) may be open at once. Panel height and collapsed state are stored in `localStorage`, not the database, since they are per-machine UI state.
 
-- **macOS**: Terminal, iTerm2, Kitty, Hyper, Alacritty, WezTerm, Warp
-- **Linux**: GNOME Terminal, Konsole, xterm, urxvt, Kitty, Alacritty, Tilix, Terminator, WezTerm, Hyper
-- **Windows**: Windows Terminal, cmd, PowerShell, ConEmu, Cmder, Alacritty, WezTerm, Hyper
+### Shell Integration
 
-The terminal preference is stored as a terminal ID string (e.g., `iterm2`, `kitty`). An empty string means auto-detect.
+| Setting | Values | Default |
+|---|---|---|
+| `shellIntegration` | `true` / `false` / unset | Unset, which means **enabled** |
+
+Shell integration activates OSC 133 semantic-prompt markers in the session's shell so Cmdex can record exactly what each command printed. This is what makes "copy last output" precise — without it, the app falls back to scraping the visible xterm buffer, which is subject to prompt text and width reflow.
+
+Supported shells: **bash**, **zsh**, **fish**, and **PowerShell**. Integration works by pointing the shell at extra startup files that Cmdex materializes under `~/.cmdex` — it never modifies the user's own dotfiles.
+
+> A change to this setting applies to **newly started sessions only**. Existing sessions keep whatever mode they were started with.
 
 ---
 
@@ -246,8 +250,9 @@ The following settings have no functional defaults and must be configured or aut
 
 | Setting | Required For | Behavior When Unset |
 |---------|-------------|---------------------|
-| `terminal` (terminal emulator ID) | **"Run in Terminal"** feature | Falls back to **auto-detect**: the application scans the system for installed terminal emulators and uses the first one found. If no terminal is detected, `OpenInTerminal` returns an error. |
-| Per-command `workingDir` (OSPathMap) | Working directory for command execution | Falls back through a **5-step resolution chain** (see "Default Working Directory" below). The final fallback is the user's home directory, so execution always has a valid working directory. |
+| An active terminal session | Running any command | `RunCommand` returns an `ExecutionRecord` with `exitCode: -1` and `error: "no active terminal session"`. The UI creates a session on startup, so this is normally satisfied. |
+| Per-command `workingDir` (OSPathMap) | Working directory for command execution | Falls back through a **5-step resolution chain** (see "Default Working Directory" below), so a concrete path always exists. Note that when neither the command nor the global default specifies a directory, **no `cd` prefix is emitted at all** and the shell stays where it is. |
+| `shellIntegration` | Exact "copy last output" | Unset means enabled. If the session's shell has no integration, `GetLastOutput` returns `available: false` and the frontend scrapes the xterm buffer instead. |
 
 ### Optional (Factory Defaults Apply)
 
@@ -274,7 +279,6 @@ This section consolidates all default values in one place. These originate from 
 | Setting | Default Value | Source |
 |---------|--------------|--------|
 | `locale` | `"en"` | `db.go` `GetSettings()` |
-| `terminal` | `""` (auto-detect) | `db.go` `GetSettings()` |
 | `theme` | `"vscode-dark"` | `db.go` `GetSettings()` |
 | `lastDarkTheme` | `"vscode-dark"` | `db.go` `GetSettings()` |
 | `lastLightTheme` | `"vscode-light"` | `db.go` `GetSettings()` |
@@ -287,6 +291,9 @@ This section consolidates all default values in one place. These originate from 
 | `windowY` | `-1` (center on screen) | `db.go` `GetSettings()` |
 | `windowWidth` | `640` | `db.go` `GetSettings()` |
 | `windowHeight` | `520` | `db.go` `GetSettings()` |
+| `shellIntegration` | `nil` (unset → treated as enabled) | `models.go` `AppSettings` |
+
+`GetSettings` merges the persisted JSON blob over this complete default struct, so a missing or partial row can never leave a field unset. `SetSettings` likewise merges partial updates over existing values — empty strings are treated as "leave unchanged", which is why clearing a value needs an explicit sentinel (e.g. a non-nil empty `defaultWorkingDir` map).
 
 ### Execution Defaults
 
@@ -334,11 +341,14 @@ The following behaviors vary by operating system at runtime (not configurable by
 
 | Behavior | macOS | Linux | Windows |
 |----------|-------|-------|---------|
-| Shell for script execution | `$SHELL` or `/bin/sh` with `-lc` flag | `$SHELL` or `/bin/sh` with `-lc` flag | `cmd` with `/C` flag |
-| Temp script extension | `.sh` | `.sh` | `.bat` |
-| Terminal emulator detection | macOS-specific app bundle paths (Terminal.app, iTerm.app, Warp.app, etc.) plus CLI terminals | Linux desktop terminals (GNOME Terminal, Konsole, xterm, etc.) | Windows Terminal, cmd, PowerShell |
-| Terminal launch method | `osascript` for `.app` bundles; direct binary launch for CLI terminals | Direct binary execution | `wt`, `cmd /c start`, or `powershell -NoExit` |
+| Session shell | `$SHELL` or `/bin/sh` with `-lc` | `$SHELL` or `/bin/sh` with `-lc` | `cmd` with `/C` |
+| PTY backend | `creack/pty` (`pty_backend_unix.go`) | `creack/pty` (`pty_backend_unix.go`) | ConPTY via `charmbracelet/x/conpty` (`pty_backend_windows.go`) |
+| Shell integration scripts | bash, zsh, fish | bash, zsh, fish | PowerShell |
+| PTY environment fixes | `buildPtyEnv` injects `TERM`/`COLORTERM`/`LANG`, which launchd-started GUI apps don't inherit | Same as macOS | Same, with known gaps (see below) |
+| Output post-processing | ANSI stripping only | ANSI stripping only | ANSI stripping **plus** removal of ConPTY's injected line-wrap artifacts (`ansi.go`) |
 | Settings shortcut | `Cmd + ,` | `Ctrl + ,` | `Ctrl + ,` |
+
+**Known Windows gaps** (documented in `AGENTS.md`): the `cd '<dir>' && ` prefix uses POSIX single-quote escaping, which is meaningless to cmd.exe and PowerShell; `buildPtyEnv` mishandles Windows' per-drive cwd entries (`=C:=C:\foo`) and case-insensitive variable names; and command dispatch assumes `\n` submits a line, where Windows shells generally expect `\r`.
 
 ### Build Configuration Overrides
 

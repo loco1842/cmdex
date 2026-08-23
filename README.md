@@ -1,6 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-<!-- GSD-DOC -->
-
 # CmDex
 
 <p align="center">
@@ -42,7 +39,8 @@ No build tools, no terminal setup — just download, install, and start saving c
 - **Organized Library** — Group commands into color-coded categories. Keep work scripts, deployment commands, and personal utilities in their own spaces.
 - **Variable Presets** — Save named sets of values (e.g., "staging" vs. "production" configs) and switch between them instantly.
 - **Smart Defaults** — Defaults support CEL expressions like `now()`, `env("HOME")`, and `date("2006-01-02")` so your commands are always up to date.
-- **Run Anywhere** — Execute commands inside CmDex with a built-in streaming output panel, or open them directly in your favorite terminal (Terminal, iTerm2, Warp, Alacritty, Kitty, Ghostty, and more).
+- **Real Built-in Terminal** — Commands run in a genuine PTY-backed terminal inside CmDex (powered by xterm.js), so interactive prompts, colors, and Ctrl+C all work. Open up to 10 terminal sessions side by side.
+- **Exact Output Copying** — Optional shell integration (bash, zsh, fish, PowerShell) marks where each command's output begins and ends, so "copy last output" gives you exactly that — no prompt text, no reflow artifacts.
 - **Lightning Search** — Find any command by title, description, tag, or script content in milliseconds (powered by SQLite FTS5).
 - **Fully Local** — Everything lives on your machine in `~/.cmdex/cmdex.db`. No accounts, no cloud, no subscriptions.
 - **Dark & Polished** — A premium dark UI with glassmorphism, smooth animations, and a layout that feels right at home on any OS.
@@ -54,7 +52,7 @@ No build tools, no terminal setup — just download, install, and start saving c
 | [Getting Started](docs/GETTING-STARTED.md) | Prerequisites, install steps, and first run |
 | [Development](docs/DEVELOPMENT.md) | Daily dev workflow, build commands, and code style |
 | [Architecture](docs/ARCHITECTURE.md) | System design, data flow, and database schema |
-| [Configuration](docs/CONFIGURATION.md) | App settings, keybindings, and terminal preferences |
+| [Configuration](docs/CONFIGURATION.md) | App settings, themes, fonts, keybindings, and shell integration |
 | [Testing](docs/TESTING.md) | Testing approach and manual test workflows |
 | [Deployment](docs/DEPLOYMENT.md) | Platform packages, CI, Docker, and release process |
 | [Contributing](CONTRIBUTING.md) | Bug reports, PR process, and coding standards |

@@ -2,13 +2,13 @@
 
 ## Status
 
-**Historical — implemented.** This spec predates implementation and is kept as the original scoping document; it does not reflect the shipped design in every detail (notably the `ptyBackend`/`ptyProcess` interface — see "Superseded by implementation" below). See `tasks/plan.md` and `tasks/todo.md` for what was actually built and verified.
+**Historical — implemented.** This spec predates implementation and is kept as the original scoping document; it does not reflect the shipped design in every detail (notably the `ptyBackend`/`ptyProcess` interface — see "Superseded by implementation" below). For what was actually built and verified, see `pty_backend_windows.go` and the **Tests** / **Known Cross-Platform Gaps** sections of `AGENTS.md`.
 
 ## Background
 
 `TerminalService`'s PTY layer is split behind a build-tagged `ptyBackend` interface (`pty_backend.go`). The darwin/linux implementation (`pty_backend_unix.go`, `creackPtyBackend`) is real and works, backed by `github.com/creack/pty`. The Windows implementation (`pty_backend_windows.go`, `conptyBackend`) **had never been implemented** at spec time — `Start` and `Resize` unconditionally returned `"Windows PTY support not yet implemented"` errors; only `Kill` (via `taskkill /F /T /PID <pid>`) had real logic, and it had never been exercised on a real Windows process. It is now fully implemented, backed by `github.com/charmbracelet/x/conpty` — see `AGENTS.md`'s Tests section.
 
-This gap is already documented in `AGENTS.md`, `CLAUDE.md`, and in full detail in `.planning/milestones/v2.1-phases/25-polish-integration/CHECKPOINT.md` (see "Windows conpty verification" section, decisions D-11 through D-14), which explicitly scoped real Windows conpty support as future work. That checkpoint's "Future work" section is the starting point for this spec, not a constraint we're bound to verbatim (see Tech Stack below on the library choice).
+At spec time this gap was documented in `AGENTS.md` and `CLAUDE.md`, and in full detail in a phase checkpoint that explicitly scoped real Windows conpty support as future work. (That checkpoint lived under the now-removed `.planning/` tree; it is recoverable from git history if the decision record is ever needed.)
 
 User-reported symptom: on Windows, terminal sessions open but input/output does not work — consistent with the stub silently failing or a session that never gets a working PTY handle.
 
@@ -24,7 +24,7 @@ Implement a real Windows ConPTY-backed `ptyBackend` so that `TerminalService` te
 ## Acceptance Criteria
 
 1. On a `windows-latest` CI runner, `go test ./...` passes, including new Windows-tagged tests that exercise the real `conptyBackend` (not the darwin-only mock).
-2. `conptyBackend.Start` spawns a real ConPTY-attached process for the detected shell, returns a `ptyHandle` that supports read/write, and the returned process (a `ptyProcess`, not an `*exec.Cmd` — ConPTY cannot be driven through `os/exec`, see `tasks/plan.md`) can be waited on and killed.
+2. `conptyBackend.Start` spawns a real ConPTY-attached process for the detected shell, returns a `ptyHandle` that supports read/write, and the returned process (a `ptyProcess`, not an `*exec.Cmd` — ConPTY cannot be driven through `os/exec`) can be waited on and killed.
 3. `conptyBackend.Resize` actually resizes the underlying pseudo-console (not a no-op stub).
 4. `conptyBackend.Kill` reliably terminates the shell process and any children it spawned; existing `taskkill`-based `killProcessGroup` logic is reused unless the chosen library provides an equivalent that's proven better.
 5. `GOOS=windows go build ./...` continues to pass (cross-compile from any dev machine, since no Windows dev machine is available locally).
@@ -57,16 +57,15 @@ Implement a real Windows ConPTY-backed `ptyBackend` so that `TerminalService` te
 No new top-level structure. Changes concentrated in:
 - `pty_backend_windows.go` — replace stub `Start`/`Resize` with real ConPTY calls; keep `Kill`/`killProcessGroup` unless the library changes what's optimal.
 - `go.mod`/`go.sum` — add the chosen conpty dependency (Windows-only import, but Go doesn't support OS-conditional `go.mod` entries — the dependency will be present for all platforms at the module level, same as how `pty_backend_unix.go`'s `github.com/creack/pty` already is).
-- A new `//go:build windows` test file (e.g. `pty_backend_windows_test.go`) exercising the real backend — mirroring the shape of `TestTerminalService_CreateSession` and friends, per CHECKPOINT.md's future-work item 4.
+- A new `//go:build windows` test file (e.g. `pty_backend_windows_test.go`) exercising the real backend — mirroring the shape of `TestTerminalService_CreateSession` and friends.
 - `.github/workflows/ci.yml` — new/extended Windows test job.
 - `AGENTS.md`, `CLAUDE.md` — update the stub note.
-- `.planning/milestones/v2.1-phases/25-polish-integration/CHECKPOINT.md` — leave as historical record (do not rewrite history); note resolution in a new checkpoint or follow-up doc if the project's convention calls for one — confirm with user during planning rather than assumed here.
 
 ## Code Style
 
 Follow existing conventions already documented in `CLAUDE.md`:
-- gofmt/tabs, `make fmt` / `make lint` (golangci-lint v2, same config as CI) must pass clean.
-- Match `pty_backend_unix.go`'s existing shape: a struct implementing `ptyBackend`, package-level helper functions preserved only if legacy test code still references them (check before assuming — CHECKPOINT.md notes this pattern was intentional for `pty_backend_unix.go`/`pty_backend_windows.go` both).
+- Format with `make fmt` (`golangci-lint fmt` — `goimports` + `golines`, max line 120; **not** `gofmt`, which is disabled in `.golangci.yml`). Tabs for indentation. `make fmt` / `make lint` (golangci-lint v2 + ESLint, same configs as CI) must pass clean.
+- Match `pty_backend_unix.go`'s existing shape: a struct implementing `ptyBackend`, package-level helper functions preserved only if legacy test code still references them (check before assuming — this split was intentional for `pty_backend_unix.go`/`pty_backend_windows.go` both).
 - No new abstractions beyond what's needed to satisfy the existing `ptyBackend`/`ptyHandle` interfaces — don't introduce a second interface layer over the conpty library.
 - Comments only where genuinely non-obvious (e.g. why a particular conpty quirk is worked around), matching the project's "no explanatory comments for obvious code" convention.
 
@@ -94,16 +93,13 @@ Follow existing conventions already documented in `CLAUDE.md`:
 - Whether to extend the existing `test` job's matrix vs. add a separate `test-windows` job (spec recommends the latter, but confirm before touching `ci.yml`).
 - Whether Windows Go tests should run on every push/PR or stay `workflow_dispatch`-gated like the rest of the `test` job.
 - Any change to `killProcessGroup`/signal semantics beyond what's strictly needed.
-- Whether to write a new CHECKPOINT-style doc under `.planning/` recording this work, given the project's existing convention of documenting phase completions there.
 
 **Never do:**
 - Modify frontend terminal code (`Terminal.tsx`, `TerminalTabBar.tsx`, xterm wiring) as part of this fix.
 - Introduce CGo dependencies (breaks the project's pure-Go build story, notably `modernc.org/sqlite`).
 - Silently drop or weaken the existing darwin/linux PTY test coverage while adding Windows coverage.
-- Rewrite the historical CHECKPOINT.md's acknowledged-gap section to make it look like the gap was always going to be closed this way — it's a historical record of a real scoping decision.
 
 ## Open Questions (for planning phase)
 
 - Exact conpty library choice — deferred to implementation-time evaluation per Tech Stack section above.
 - `test-windows` CI job trigger (workflow_dispatch vs. push/PR) — needs explicit user decision before touching `ci.yml`.
-- Whether a new `.planning/` checkpoint doc should accompany this work, per repo convention.

@@ -16,15 +16,6 @@ frontend/dist/*
 todos/
 .cursor/rules/claude-mem-context.mdc
 
-.planning/*
-
-!.planning/PROJECT.md
-!.planning/ROADMAP.md
-!.planning/REQUIREMENTS.md
-!.planning/milestones/
-!.planning/phases/
-!.planning/codebase/
-
 .claude/settings.local.json
 
 .env

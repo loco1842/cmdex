@@ -1,5 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # Testing Guide
 
 This document covers the current testing status, manual testing workflows, and a roadmap for introducing automated tests in the Cmdex project.
@@ -71,9 +69,12 @@ Use Go's built-in `testing` package and standard `reflect.DeepEqual` (or `github
 | Module | File | Why test |
 |--------|------|----------|
 | Script parsing | `script.go` | Pure functions (`ExtractTemplateVars`, `ReplaceTemplateVars`, `MergeDetectedVars`, `ParseScriptBody`) are deterministic and easy to unit test. |
-| Executor logic | `executor.go` | `EvalDefaults` (CEL expression evaluation), `BuildDisplayCommand`, `BuildFinalCommand`, and terminal-def selection logic. |
+| Executor helpers | `executor.go` | `EvalDefaults` (CEL expression evaluation), `stripShebang`, `shellQuoteDir`. Pure and deterministic. |
 | Database layer | `db.go` | CRUD operations, migrations, and FTS search. Use a temporary SQLite file or `:memory:` database in tests. |
-| Service layer | `*_service.go` | Thin wrappers around `db` methods; test input validation and error handling. |
+| Service layer | `*_service.go` | Thin wrappers around `db` methods; test input validation and error handling. `execution_service_test.go` covers working-directory resolution and `FinalCmd` construction. |
+| Terminal sessions | `terminal_service.go` | Session lifecycle, concurrency, and the `MaxSessions` limit. Use the mock backend (`pty_backend_mock.go`) to avoid spawning real shells. |
+| Output capture | `terminal_capture.go`, `ansi.go` | OSC 133 marker scanning across chunk boundaries, and ConPTY wrap-artifact removal — both are byte-level and highly regression-prone. |
+| Shell integration | `shell_integration.go` | That the embedded scripts materialize correctly (notably that zsh's dot-prefixed files survive the `//go:embed all:` directive). |
 
 **Example test file pattern:**
 
@@ -254,7 +255,7 @@ Go tests and Playwright e2e already run via the `test` job. Once Vitest is confi
   run: cd frontend && pnpm test
 ```
 
-You may also want to run `go test ./...` on each OS in the `build-check` matrix to catch platform-specific behavior in `executor.go` (the `test` job only runs on `ubuntu-24.04`).
+Platform coverage is already partly addressed: a dedicated `test-windows` job runs `go test -race ./...` on `windows-latest`, which is where the PTY layer diverges most (ConPTY, wrap artifacts, quoting). macOS is still only covered by `build-check`, so macOS-specific terminal behavior is not exercised by CI.
 
 ## 6. Test Framework and Setup
 
@@ -310,13 +311,15 @@ go test -run TestFreshDBMigrations -v ./...
 ok      cmdex   0.234s
 ```
 
-Three tests pass across the root package. The `migrations/` package has no test files.
+All tests live in the root package (`db_test.go`, `execution_service_test.go`, `terminal_service_test.go` and its race/stress/max-sessions variants, `pty_backend_*_test.go`, `terminal_capture_test.go`, `ansi_test.go`, `shell_integration_test.go`, `pty_env_test.go`). The `migrations/` package has no test files of its own — migrations are covered indirectly by `db_test.go`.
+
+Some tests are build-tagged or skipped by platform: the stress and max-sessions variants are `//go:build darwin` and use the mock PTY backend, while `TestTerminalShutdown`/`TestTerminalExit` and `TestRunCommand_FinalCmdWithWorkingDir`/`FinalCmdMultilineScript` are Windows-skipped because they assume Unix shell syntax and POSIX quoting.
 
 `make test` runs `go test ./...` followed by the frontend Playwright e2e suite (`cd frontend && pnpm test:e2e`); there is no `task test` target in `Taskfile.yml`.
 
 ### Frontend Tests
 
-No test runner is installed. Once Vitest is set up (see [Section 3](#3-planned-testing-strategy)), the expected commands would be:
+Playwright is installed and runs the e2e suite (`cd frontend && pnpm test:e2e`, config at `frontend/e2e/playwright.config.ts`). There is no **unit** test runner yet. Once Vitest is set up (see [Section 3](#3-planned-testing-strategy)), the expected commands would be:
 
 ```bash
 cd frontend && pnpm test         # Run once
@@ -391,13 +394,16 @@ test: {
 
 ### Current CI Pipeline
 
-Test execution **is part of the CI pipeline**, via a dedicated `test` job. The CI configuration lives at `.github/workflows/ci.yml` and consists of three jobs:
+Test execution **is part of the CI pipeline**. The CI configuration lives at `.github/workflows/ci.yml` and consists of four jobs:
 
-| Job | Trigger | What It Does |
-|-----|---------|--------------|
-| `typecheck` | push/PR to `main` | Lint frontend, `go build ./...`, `golangci-lint`, generate Wails bindings, `tsc --noEmit` |
-| `test` | push/PR to `main` | `go test ./...` and the frontend Playwright e2e suite (`pnpm test:e2e`); blocks the run on failure |
-| `build-check` | push/PR to `main` | Cross-platform build via `task build` on ubuntu-24.04, macos-latest, windows-latest |
+| Job | Runner | What It Does |
+|-----|--------|--------------|
+| `typecheck` | ubuntu-24.04 | Lint frontend, `go build ./...`, `golangci-lint`, generate Wails bindings, `tsc --noEmit` |
+| `test` | ubuntu-24.04 | `go test -race ./...` and the frontend Playwright e2e suite (`pnpm test:e2e`); blocks the run on failure |
+| `test-windows` | windows-latest | `go test -race ./...`, including the real ConPTY backend tests; blocks the run on failure |
+| `build-check` | matrix: ubuntu-24.04, macos-latest, windows-latest | Cross-platform build via `task build` |
+
+> Note that CI runs `go test -race`, while `make test` runs plain `go test`. A data race in the terminal session code can therefore pass locally and fail in CI — run `go test -race ./...` yourself when touching `terminal_service.go` or `terminal_capture.go`.
 
 **Key CI details:**
 - Wails CLI version: `v3.0.0-beta.8` (pinned via `WAILS_VERSION` env var in CI)
@@ -405,6 +411,9 @@ Test execution **is part of the CI pipeline**, via a dedicated `test` job. The C
 - Node version: `24` (pinned via `NODE_VERSION` env var in CI)
 - Package manager: `pnpm` 11 (pinned via `PNPM_VERSION`; installed with `pnpm/action-setup@v6`)
 - `golangci-lint` and `pnpm lint` block the `typecheck` job on any finding
+- CI never invokes the Makefile — `make check`/`fmt`/`lint`/`test` are local conveniences that mirror the CI steps
+
+**e2e gotcha:** `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by hardcoding each generated binding's numeric `$Call.ByID` method hash. If you regenerate bindings and those IDs shift, the mock silently stops matching — tests fail with `[e2e mock] no handler for method ID …` console warnings rather than an obvious error. Update the handler table whenever you change a bound method signature.
 
 ### Adding Tests to CI
 

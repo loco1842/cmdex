@@ -1,5 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # API Reference
 
 CmDex exposes its backend through Wails v3 **service method bindings** and **runtime events**. During build, Wails auto-generates TypeScript binding modules from the Go service structs, providing type-safe function calls and model classes to the frontend. There are no HTTP endpoints — all communication happens over Wails' internal IPC bridge.
@@ -14,11 +12,11 @@ The Go backend registers seven services, each scoped to a domain:
 |---|---|---|---|
 | App | `App` | `app.js` | Application lifecycle, native dialogs, OS detection |
 | CommandService | `CommandService` | `commandservice.js` | Command & category CRUD, variable presets, search |
-| ExecutionService | `ExecutionService` | `executionservice.js` | Command execution, output streaming, history |
-| SettingsService | `SettingsService` | `settingsservice.js` | User preferences, terminal detection |
+| ExecutionService | `ExecutionService` | `executionservice.js` | Variable resolution, dispatching a command to the active terminal |
+| SettingsService | `SettingsService` | `settingsservice.js` | User preferences |
 | ImportExportService | `ImportExportService` | `importexportservice.js` | Command import/export, theme template export |
 | EventService | `EventService` | `eventservice.js` | Event name constants for type-safe event handling |
-| TerminalService | `TerminalService` | `terminalservice.js` | Multi-session PTY-backed terminals |
+| TerminalService | `TerminalService` | `terminalservice.js` | Multi-session PTY-backed terminals, output capture |
 
 Every service method returns a `CancellablePromise<T>` (from `@wailsio/runtime`). On error, the promise rejects — there is no explicit error return in the TypeScript signature.
 
@@ -37,11 +35,10 @@ import { GetCategories, CreateCategory, UpdateCategory, DeleteCategory,
          SearchCommands, ResetAllData }
     from '../bindings/cmdex/commandservice';
 
-import { GetVariables, RunCommand, GetExecutionHistory,
-         ClearExecutionHistory, RunInTerminal }
+import { GetVariables, RunCommand }
     from '../bindings/cmdex/executionservice';
 
-import { GetSettings, SetSettings, GetAvailableTerminals }
+import { GetSettings, SetSettings }
     from '../bindings/cmdex/settingsservice';
 
 import { ExportCommands, ImportCommands, SaveThemeTemplate }
@@ -53,16 +50,21 @@ import { ShowSettingsWindow, GetOS, PickDirectory }
 import { GetEventNames }
     from '../bindings/cmdex/eventservice';
 
+import { CreateSession, ListSessions, CloseSession, RenameSession,
+         SetActiveSession, GetActiveSession, Start, Stop,
+         Write, Resize, Clear, GetLastOutput }
+    from '../bindings/cmdex/terminalservice';
+
 // Barrel import (all services + models)
 import { App, CommandService, EventService, ExecutionService,
-         ImportExportService, SettingsService,
+         ImportExportService, SettingsService, TerminalService,
          AppSettings, Category, Command, EventNames,
-         ExecutionRecord, TerminalInfo,
+         ExecutionRecord, SessionInfo, TerminalLastOutput,
          VariableDefinition, VariablePreset, VariablePrompt }
     from '../bindings/cmdex';
 ```
 
-Model classes (`AppSettings`, `Category`, `Command`, `ExecutionRecord`, `TerminalInfo`, `VariableDefinition`, `VariablePreset`, `VariablePrompt`, `EventNames`) are also exported from `../bindings/cmdex/models.js` and re-exported by the barrel `index.js`.
+Model classes (`AppSettings`, `Category`, `Command`, `ExecutionRecord`, `SessionInfo`, `TerminalLastOutput`, `VariableDefinition`, `VariablePreset`, `VariablePrompt`, `EventNames`) are also exported from `../bindings/cmdex/models.js` and re-exported by the barrel `index.js`.
 
 ---
 
@@ -90,7 +92,7 @@ A saved CLI command with metadata, template variables, and presets.
 | `id` | `string` | UUID |
 | `title` | `NullString` | Display title (`String` / `Valid`) |
 | `description` | `NullString` | Optional description |
-| `scriptContent` | `string` | Full script including `#!/bin/bash` header |
+| `scriptContent` | `string` | The script body. Stored **without** a shebang; records saved by older versions may still carry a leading `#!` line, which the backend strips on read |
 | `tags` | `string[]` | User-defined tags |
 | `variables` | `VariableDefinition[]` | Template variable definitions |
 | `presets` | `VariablePreset[]` | Named sets of variable values |
@@ -138,28 +140,44 @@ Returned by `GetVariables()` to drive the fill-variables modal.
 
 ### `ExecutionRecord`
 
-Captures a single command execution for history.
+The return value of `RunCommand`. Despite the name, it is **not** persisted anywhere — see the `RunCommand` notes below.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `string` | UUID |
-| `commandId` | `string` | ID of the executed command |
-| `scriptContent` | `string` | Full script content at time of execution |
-| `finalCmd` | `string` | Resolved command with variable values substituted |
-| `output` | `string` | Captured stdout (max 8 KB stored) |
-| `error` | `string` | Captured stderr or error message |
-| `exitCode` | `number` | Process exit code (0 = success, -1 = error/timeout) |
-| `workingDir` | `string` | Resolved working directory used |
-| `executedAt` | `string` (RFC 3339) | Execution timestamp |
+| `id` | `string` | UUID, generated per call |
+| `commandId` | `string` | ID of the dispatched command |
+| `scriptContent` | `string` | Unused on the current path (empty) |
+| `finalCmd` | `string` | The exact line written to the PTY, including any `cd '<dir>' && ` prefix and trailing newline |
+| `output` | `string` | Unused — output streams over `pty-output:<id>` instead (empty) |
+| `error` | `string` | Populated only on dispatch failure (no active session, write error, command not found) |
+| `exitCode` | `number` | `-1` on dispatch failure; `0` (zero value) on success — it is **not** the command's exit code |
+| `workingDir` | `string` | Unused on the current path (empty) |
+| `executedAt` | `string` (RFC 3339) | Dispatch timestamp |
 
-### `TerminalInfo`
+> To learn a command's real exit status or output, use `TerminalService.GetLastOutput(sessionId)` (requires shell integration) or watch the `pty-output:<id>` stream.
 
-Describes a detected terminal emulator available for `RunInTerminal`.
+### `SessionInfo`
+
+A terminal session, as returned by `CreateSession`, `ListSessions`, and `GetActiveSession`.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `string` | Terminal ID (e.g., `"terminal"`, `"iterm2"`, `"alacritty"`) |
-| `name` | `string` | Human-readable name (e.g., `"Terminal"`, `"iTerm2"`) |
+| `id` | `string` | Session UUID — also the suffix of that session's `pty-*` event names |
+| `name` | `string` | Display name shown in the terminal tab bar |
+| `running` | `boolean` | Whether the PTY process is alive |
+| `shellPath` | `string` | Resolved shell binary for this session |
+| `workingDir` | `string` | Directory the session was started in |
+
+### `TerminalLastOutput`
+
+Returned by `GetLastOutput`. Produced from OSC 133 shell-integration markers.
+
+| Field | Type | Description |
+|---|---|---|
+| `available` | `boolean` | `false` when no command has completed under shell integration (including sessions whose shell has no integration). The other fields are zero values, and the caller should fall back to scraping the xterm buffer |
+| `text` | `string` | Exact output of the last completed command, ANSI-stripped |
+| `exitCode` | `number` | That command's real exit code, from the `D;<code>` marker |
+| `truncated` | `boolean` | `true` if output exceeded the 1 MiB capture cap (the tail is kept) |
 
 ### `AppSettings`
 
@@ -168,7 +186,6 @@ User preferences persisted to the SQLite database.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `locale` | `string` | No | Language code (e.g., `"en"`, `"zh"`). Default: `"en"` |
-| `terminal` | `string` | No | Preferred terminal ID. Empty = auto-detect |
 | `theme` | `string` | No | Active theme ID (e.g., `"vscode-dark"`) |
 | `lastDarkTheme` | `string` | No | Last used dark theme ID |
 | `lastLightTheme` | `string` | No | Last used light theme ID |
@@ -181,6 +198,9 @@ User preferences persisted to the SQLite database.
 | `windowY` | `number` | No | Settings window Y position |
 | `windowWidth` | `number` | No | Settings window width (min 480) |
 | `windowHeight` | `number` | No | Settings window height (min 400) |
+| `shellIntegration` | `boolean` | No | OSC 133 shell-integration markers. Unset (`null`) = enabled. Applies to **newly started sessions only** |
+
+There is no `terminal` field — the external-terminal-emulator preference was removed when execution moved into the built-in PTY terminal.
 
 ### `OSPathMap`
 
@@ -192,11 +212,12 @@ Returned by `GetEventNames()` with the following fields:
 
 | Field | Event Constant | Event Data |
 |---|---|---|
-| `cmdOutput` | `"cmd-output"` | `{ stream: "stdout" \| "stderr", data: string }` |
 | `openSettings` | `"open-settings"` | none |
 | `openShortcuts` | `"open-shortcuts"` | none |
 | `settingsChanged` | `"settings-changed"` | `Partial<SettingsPayload>` |
 | `settingsWindowClosing` | `"settings-window-closing"` | none |
+
+Per-session terminal events (`pty-output:<id>`, `pty-exit:<id>`, `pty-cleared:<id>`) are **not** in `EventNames` — they are built by string concatenation from a session ID. See [Wails Runtime Events](#wails-runtime-events).
 
 ---
 
@@ -259,7 +280,7 @@ const deployCmds: Command[] = await GetCommandsByCategory(deployCatId);
 
 #### `CreateCommand(title, description, scriptBody, categoryID, tags, variables, workingDir)`
 
-Creates a new command. The `scriptBody` is the raw command body (without shebang) — the backend wraps it in `#!/bin/bash`. `tags` and `variables` default to empty arrays if `null`.
+Creates a new command. The `scriptBody` is the raw command body; `GenerateScript` only trims it and adds a trailing newline — **no shebang is added**. `tags` and `variables` default to empty arrays if `null`, and each variable's `sortOrder` is reassigned to its array index.
 
 ```typescript
 import type { VariableDefinition, OSPathMap } from '../bindings/cmdex';
@@ -316,7 +337,7 @@ const cmds: Command[] = await ReorderCommand(cmd.id, 0, targetCategoryId);
 
 #### `GetScriptContent(commandID: string)`
 
-Returns the full script content (including shebang header) for editing.
+Returns the stored script content verbatim — including a legacy shebang line, if this record was saved by an older version.
 
 ```typescript
 const fullScript: string = await GetScriptContent(cmd.id);
@@ -324,7 +345,7 @@ const fullScript: string = await GetScriptContent(cmd.id);
 
 #### `GetScriptBody(commandID: string)`
 
-Returns just the script body (shebang stripped) for simple-mode editing.
+Returns the script body with any leading shebang stripped (via `ParseScriptBody`). This is what the editor displays.
 
 ```typescript
 const body: string = await GetScriptBody(cmd.id);
@@ -411,72 +432,165 @@ const prompts: VariablePrompt[] = await GetVariables(cmd.id);
 
 #### `RunCommand(commandID: string, variables: Record<string, string>)`
 
-Executes a command with template variables resolved. Streams stdout/stderr chunks via the `cmd-output` Wails event **during execution**, then returns the final `ExecutionRecord` once the process completes. The execution is persisted to history automatically.
+Resolves the command's template variables and **writes the resulting line to the active terminal session's PTY**. It does not spawn a subprocess, capture output, or wait for the command to finish.
 
 ```typescript
 const record: ExecutionRecord = await RunCommand(cmd.id, { message: 'hello world' });
-// record.output contains captured stdout (max 8KB)
-// record.error contains captured stderr or error message
-// record.exitCode is 0 for success, -1 for error/timeout
+// record.finalCmd is the exact line written to the PTY
+// record.exitCode is -1 only if DISPATCH failed (no active session, write error)
+// record.output is always empty — watch pty-output:<id> instead
 ```
 
-**Streaming output pattern:**
+**What it does, in order:**
+
+1. Loads the command and substitutes `{{vars}}`.
+2. Strips any shebang and trims trailing newlines.
+3. If — and only if — the command or global settings define a working directory for the current OS, prefixes `cd '<dir>' && ` (POSIX single-quote escaping).
+4. Appends `\n` and calls `TerminalService.Write` on the active session.
+
+**Because it goes through a real PTY:**
+
+- There is **no timeout** and no output cap on execution — the command runs until it finishes, exactly as if typed.
+- Interactive prompts, colors, and TUIs work. `Ctrl+C` reaches the process via the PTY's foreground process group.
+- Shell state (cwd, exported variables, activated virtualenvs) persists between runs in the same session.
+- Nothing is written to execution history.
+
+**Failure modes** return an `ExecutionRecord` with `exitCode: -1` and a populated `error`, rather than rejecting:
+
+```typescript
+const record = await RunCommand(cmd.id, vars);
+if (record.exitCode === -1) {
+  // "no active terminal session" | "terminal service not initialized" | write/lookup error
+  console.error(record.error);
+}
+```
+
+**Reading the output:**
 
 ```typescript
 import { Events } from '@wailsio/runtime';
-import { eventNames } from './wails/events';
 
-// Subscribe BEFORE calling RunCommand
-const cleanup = Events.On(eventNames.cmdOutput, (event) => {
-  const chunk = event.data as { stream: 'stdout' | 'stderr'; data: string };
-  if (chunk.stream === 'stderr') {
-    console.error(chunk.data);
-  } else {
-    console.log(chunk.data);
-  }
+// Live stream — subscribe once per session, not per run
+const cleanup = Events.On(`pty-output:${sessionId}`, (event) => {
+  const { data } = event.data as { data: string };
+  term.write(data); // raw PTY bytes, feed straight to xterm.js
 });
 
-// Execute
-const record = await RunCommand(cmd.id, vars);
-
-// Unsubscribe when done
-cleanup();
+// Or, after the command completes, get exactly what it printed:
+const last = await GetLastOutput(sessionId);
+if (last.available) {
+  console.log(last.text, last.exitCode);
+}
 ```
 
-- **Execution timeout:** 60 seconds. Timed-out commands return `exitCode: -1` with an error message.
-- **Output cap:** Persisted output is truncated to 8 KB. The full stream is delivered via events but only the first 8 KB is stored in history.
+---
 
-#### `RunInTerminal(commandID: string, variables: Record<string, string>)`
+## TerminalService API
 
-Opens the resolved command in the system's terminal emulator. Uses the user's preferred terminal from settings, or auto-detects an available one. The terminal remains open after the command completes.
+Manages PTY-backed terminal sessions. At most `MaxSessions` (**10**) may exist concurrently; `CreateSession` rejects beyond that.
+
+Every session ID doubles as an event namespace: a session's output arrives on `pty-output:<id>`. See [Wails Runtime Events](#wails-runtime-events).
+
+### Session Lifecycle
+
+#### `CreateSession()`
+
+Creates a session and returns its `SessionInfo`. The PTY process is not started until `Start` is called with the terminal's dimensions.
 
 ```typescript
-await RunInTerminal(cmd.id, { message: 'hello' });
+const session: SessionInfo = await CreateSession();
 ```
 
-**Supported terminals by OS:**
+#### `Start(sessionId: string, cols: number, rows: number)`
 
-| OS | Supported Terminals |
-|---|---|
-| macOS | Terminal.app, iTerm2, Warp, Alacritty, Kitty, Ghostty, Hyper |
-| Linux | GNOME Terminal, GNOME Console (kgx), Konsole, XFCE Terminal, Alacritty, Kitty, Ghostty, XTerm |
-| Windows | Windows Terminal, Command Prompt (cmd), PowerShell / pwsh |
-
-#### `GetExecutionHistory()`
-
-Returns all past execution records.
+Spawns the shell for the session at the given dimensions. Call this once the xterm instance has been measured, so the PTY's initial size matches what the user sees.
 
 ```typescript
-const history: ExecutionRecord[] = await GetExecutionHistory();
+await Start(session.id, term.cols, term.rows);
 ```
 
-#### `ClearExecutionHistory()`
+#### `Stop(sessionId: string)`
 
-Deletes all execution history records.
+Terminates the session's process but keeps the session in the list, so it can be restarted with `Start`.
 
 ```typescript
-await ClearExecutionHistory();
+await Stop(session.id);
 ```
+
+#### `CloseSession(id: string)`
+
+Terminates the process and removes the session entirely. Unsubscribe from its `pty-*` events afterwards.
+
+```typescript
+await CloseSession(session.id);
+```
+
+#### `ListSessions()`
+
+Returns all sessions.
+
+```typescript
+const sessions: SessionInfo[] = await ListSessions();
+```
+
+#### `RenameSession(id: string, name: string)`
+
+Sets a session's display name.
+
+```typescript
+await RenameSession(session.id, 'build');
+```
+
+#### `SetActiveSession(id: string)` / `GetActiveSession()`
+
+Sets or reads the active session. **`ExecutionService.RunCommand` dispatches to whatever `GetActiveSession` returns**, so keep this in sync with the focused terminal tab.
+
+```typescript
+await SetActiveSession(session.id);
+const active: SessionInfo | null = await GetActiveSession();
+```
+
+### Session I/O
+
+#### `Write(sessionId: string, data: string)`
+
+Writes raw bytes to the PTY. This is how keystrokes from xterm.js reach the shell, and how `RunCommand` dispatches a command. Include a trailing `\n` to submit a line.
+
+```typescript
+await Write(session.id, 'echo hello\n');
+```
+
+#### `Resize(sessionId: string, cols: number, rows: number)`
+
+Informs the PTY of a new window size so the shell can reflow. Call on every xterm fit.
+
+```typescript
+await Resize(session.id, term.cols, term.rows);
+```
+
+#### `Clear(sessionId: string)`
+
+Clears the session and emits `pty-cleared:<id>` so the frontend can reset its xterm buffer.
+
+```typescript
+await Clear(session.id);
+```
+
+#### `GetLastOutput(sessionId: string)`
+
+Returns the exact output of the most recently completed command in the session, recorded from OSC 133 shell-integration markers — no prompt text, no echoed command, no reflow artifacts.
+
+```typescript
+const last: TerminalLastOutput = await GetLastOutput(session.id);
+if (last.available) {
+  await navigator.clipboard.writeText(last.text);
+} else {
+  // Shell has no integration (or none has completed yet) — fall back to
+  // scraping the xterm buffer.
+}
+```
+
+Requires `AppSettings.shellIntegration` to have been enabled **when the session started**. Capture is bounded at 1 MiB; on overflow the tail is kept and `truncated` is `true`.
 
 ---
 
@@ -510,15 +624,6 @@ import { Events } from '@wailsio/runtime';
 Events.Emit(eventNames.settingsChanged, newSettingsPayload);
 ```
 
-#### `GetAvailableTerminals()`
-
-Returns all terminal emulators detected on the current system.
-
-```typescript
-const terminals: TerminalInfo[] = await GetAvailableTerminals();
-// Example: [{ id: 'terminal', name: 'Terminal' }, { id: 'iterm2', name: 'iTerm2' }]
-```
-
 ---
 
 ## ImportExportService API
@@ -542,7 +647,7 @@ await ExportCommands([cmd1.id, cmd2.id]);
     {
       "title": "Greet",
       "description": "Print a greeting",
-      "scriptContent": "#!/bin/bash\n\necho \"{{message}}\"\n",
+      "scriptContent": "echo \"{{message}}\"\n",
       "tags": ["greeting"],
       "variables": [{ "name": "message", "description": "...", "example": "...", "default": "", "sortOrder": 0 }],
       "presets": [{ "name": "Default", "values": { "message": "hello" } }],
@@ -610,7 +715,6 @@ Returns the canonical Wails event name constants. The frontend uses an `initEven
 ```typescript
 import { GetEventNames } from '../bindings/cmdex/eventservice';
 const names = await GetEventNames();
-// names.cmdOutput === "cmd-output"
 // names.openSettings === "open-settings"
 // names.settingsChanged === "settings-changed"
 // names.settingsWindowClosing === "settings-window-closing"
@@ -634,30 +738,55 @@ interface WailsEvent {
 }
 ```
 
-### `cmd-output`
+### `pty-output:<sessionId>`
 
-Emitted by the backend during `RunCommand()` execution. Each chunk is one line of stdout or stderr output.
+Raw bytes read from that session's PTY. Emitted continuously by the session's read-loop goroutine — this is the only channel command output travels on.
 
-**Emitter:** `ExecutionService.RunCommand` (Go backend, via `wailsApp.Event.Emit`)
+**Emitter:** `TerminalService` read loop (`terminal_service.go`, via `wailsApp.Event.Emit`)
 
-**Data:**
-
-```typescript
-{ stream: "stdout" | "stderr"; data: string }
-```
+**Data:** `{ data: string }`
 
 **Usage:**
 
 ```typescript
 import { Events } from '@wailsio/runtime';
-import { eventNames } from './wails/events';
 
-const cleanup = Events.On(eventNames.cmdOutput, (event) => {
-  const chunk = event.data as { stream: string; data: string };
-  // chunk.stream is "stdout" or "stderr"
-  // chunk.data is a line of output (with trailing newline)
+const cleanup = Events.On(`pty-output:${sessionId}`, (event) => {
+  const { data } = event.data as { data: string };
+  term.write(data); // raw bytes, including ANSI escapes — feed straight to xterm.js
 });
 ```
+
+Do not line-split or trim this data: it is a byte stream, and escape sequences can straddle chunk boundaries.
+
+### `pty-exit:<sessionId>`
+
+Emitted once when the session's shell process exits.
+
+**Data:** `{ exitCode: number; wasIntentional: boolean }`
+
+`wasIntentional` is `true` when the exit followed a `Stop`/`CloseSession` call, letting the UI distinguish a deliberate close from a crash or a user typing `exit`.
+
+```typescript
+Events.On(`pty-exit:${sessionId}`, (event) => {
+  const { exitCode, wasIntentional } = event.data as {
+    exitCode: number; wasIntentional: boolean;
+  };
+  if (!wasIntentional) markSessionDead(sessionId, exitCode);
+});
+```
+
+### `pty-cleared:<sessionId>`
+
+Emitted after a successful `Clear(sessionId)` so the frontend can reset its xterm buffer.
+
+**Data:** none
+
+```typescript
+Events.On(`pty-cleared:${sessionId}`, () => term.clear());
+```
+
+> **Note:** these three are the only output-bearing events. There is no `cmd-output` event — earlier revisions of this document described one, but command output has never flowed through a Go-side streaming callback since execution moved into the PTY terminal.
 
 ### `open-settings`
 
@@ -702,7 +831,7 @@ Emitted by the frontend after settings are saved, so other windows (e.g., the ma
 ```typescript
 interface SettingsPayload {
   locale?: string;
-  terminal?: string;
+  shellIntegration?: boolean;
   theme?: string;
   lastDarkTheme?: string;
   lastLightTheme?: string;
@@ -753,7 +882,9 @@ All service methods are promise-based. On error, the promise rejects with a stri
 
 1. **Database errors** — Returned as plain error strings from the DB layer (e.g., unique constraint violations, not-found errors).
 2. **Validation errors** — Returned from service methods before touching the DB (e.g., preset ownership validation, import version mismatch).
-3. **System errors** — File I/O errors, execution failures (returned as `ExecutionRecord` with `exitCode: -1` and an `error` field, not as promise rejections).
+3. **System errors** — File I/O errors, PTY/session errors (e.g. `CreateSession` past `MaxSessions`, writing to an unknown session ID).
+
+Note that read-style methods do **not** reject. `GetCategories`, `GetCommands`, `GetVariables`, `SearchCommands`, and friends log the error on the Go side and return an empty slice, so an empty result does not distinguish "nothing found" from "query failed".
 
 **Error handling pattern:**
 
@@ -766,13 +897,15 @@ try {
 }
 ```
 
-For `RunCommand`, non-zero exit codes and execution errors are returned in the `ExecutionRecord`, not as rejections:
+For `RunCommand`, **dispatch** failures are returned in the `ExecutionRecord` rather than as rejections. The command's own success or failure is not reported here at all — it happens asynchronously in the terminal:
 
 ```typescript
 const record = await RunCommand(cmd.id, vars);
-if (record.exitCode !== 0) {
-  console.error('Command failed:', record.error);
+if (record.exitCode === -1) {
+  console.error('Could not dispatch:', record.error);
 }
+// The command itself may still fail later. To observe that, read
+// GetLastOutput(sessionId).exitCode once it has completed.
 ```
 
 ---
@@ -802,4 +935,8 @@ When executing a command, the working directory is resolved using a fallback cha
 4. **Current working directory** — `os.Getwd()`
 5. **System temp directory** — `os.TempDir()`
 
-This resolution happens in `ExecutionService.resolveWorkingDir()` (Go backend) and is transparent to the frontend. The resolved path is included in `ExecutionRecord.workingDir`.
+This resolution happens in `ExecutionService.resolveWorkingDir()` (Go backend) and never returns an empty string.
+
+A separate check, `hasExplicitWorkingDir`, decides whether a `cd` prefix is emitted at all: only steps 1 and 2 count as "explicit". When neither the command nor global settings specify a directory, no `cd` is prepended and the shell simply stays where it is — the later fallbacks exist for callers that need a concrete path, not to pin every command to `$HOME`.
+
+The resolved path appears in `ExecutionRecord.finalCmd` (inside the `cd '<dir>' && ` prefix) when a prefix was emitted. `ExecutionRecord.workingDir` is **not** populated on this path.

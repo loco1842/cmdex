@@ -1,5 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-
 # Getting Started
 
 This guide will walk you through setting up the Cmdex project for local development and building it from source.

@@ -1,6 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
-<!-- GSD-DOC -->
-
 # Contributing to CmDex
 
 Thank you for your interest in contributing to CmDex! This document provides guidelines and instructions to help you get started.
@@ -76,29 +73,35 @@ task dev
 | `wails3 dev` | Development mode with hot-reload |
 | `task build` | Build via Task (cross-platform) |
 | `task dev` | Dev mode via Task |
-| `cd frontend && pnpm lint` | Run ESLint |
-| `cd frontend && pnpm lint:fix` | Auto-fix ESLint issues |
-| `cd frontend && pnpm tsc --noEmit` | TypeScript type check |
+| `make check` | `go build ./...` + TypeScript type check |
+| `make lint` | `golangci-lint run` + ESLint (both blocking in CI) |
+| `make fmt` | `golangci-lint fmt` + `pnpm lint:fix` |
+| `make test` | Go tests, then the Playwright e2e suite |
+| `make generate` | Regenerate Wails bindings after Go service changes |
+| `cd frontend && pnpm lint` | Run ESLint on its own |
+| `cd frontend && pnpm tsc --noEmit` | TypeScript type check on its own |
 
 ## Pull Request Process
 
 1. Fork the repository and create a branch from `main`.
 2. Make your changes.
-3. Ensure the project builds, lints, and type-checks:
-   - `go build ./...`
-   - `cd frontend && pnpm lint`
-   - `cd frontend && pnpm tsc --noEmit`
-4. Update documentation if your changes affect user-facing behavior.
-5. Open a pull request against the `main` branch with a clear description.
+3. If you changed a Go service signature, run `make generate` and commit the regenerated `frontend/bindings/`.
+4. Ensure the project builds, lints, type-checks, and passes tests:
+   - `make check` — `go build ./...` + `pnpm tsc --noEmit`
+   - `make lint` — `golangci-lint run` + ESLint (**both block CI on any finding**)
+   - `make test` — `go test ./...` + the Playwright e2e suite
+5. Update documentation if your changes affect user-facing behavior.
+6. Open a pull request against the `main` branch with a clear description.
 
-Our CI runs TypeScript type checks and lint checks on Ubuntu, with build verification across Ubuntu, macOS, and Windows for every pull request.
+For every pull request, CI runs type checks plus Go and frontend lint on Ubuntu, the Go test suite with `-race` on both Ubuntu and Windows, the Playwright e2e suite on Ubuntu, and build verification across Ubuntu, macOS, and Windows.
 
 ## Coding Standards
 
 ### Go
 
-- Follow standard Go conventions. Run `make fmt` (`golangci-lint fmt`) before committing.
-- Keep the backend code in the project root (e.g., `app.go`, `db.go`, `executor.go`, `models.go`).
+- Follow standard Go conventions. Run `make fmt` before committing — it applies `golangci-lint fmt` (goimports + golines) to Go and `pnpm lint:fix` to the frontend.
+- Keep the backend code in the project root (e.g. `app.go`, `db.go`, `executor.go`, `models.go`); schema migrations go in the `migrations/` package.
+- Read-style bound methods log with `fmt.Println` and return empty slices; mutations return `(T, error)` and propagate. Match that convention rather than introducing a logging library.
 
 ### TypeScript / React
 
