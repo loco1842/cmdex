@@ -116,21 +116,36 @@ func (d shellDialect) submitKey() string {
 	return "\r"
 }
 
+// stripControlChars removes every ASCII C0 control byte (0x00-0x1F) and DEL
+// (0x7F) from s. No real filesystem path legitimately contains any of these
+// (unlike '%', there is no usability cost to removing them), and every one
+// of them is meaningful to the terminal/line-editing layer the resolved
+// command line is written into — not just '\r'/'\n' (submit keys), but also
+// bytes like ^C/^\/^Z (signal generation), ^U/^W (line/word kill), and
+// backspace/DEL (character erase). Those are intercepted by the pty's line
+// discipline or the shell's line editor (e.g. readline) BEFORE the shell's
+// own parser ever sees the quoted string, so shell-level quoting — which
+// only constrains how the parser reads bytes it actually receives — cannot
+// neutralize them. A crafted workingDir containing e.g. ^U (kill-line) could
+// erase the "cd '<dir>' && " prefix already typed ahead of it and have
+// whatever follows run as a brand-new, completely unrelated command line.
+func stripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // cdPrefix returns the change-directory command plus the separator that
 // keeps it on the SAME submitted line as the script that follows, so the
 // script does not run when the directory is unusable.
 //
-// CR and LF are stripped here, once, ahead of the per-dialect quoting below:
-// no real filesystem path legitimately contains either (unlike '%', there is
-// no usability cost to removing them), and each is byte-identical to some
-// dialect's submit key ('\r' for cmd.exe/PowerShell, '\n' for POSIX — see
-// submitKey). Left in place, a crafted workingDir could inject an early
-// Enter into the interactive shell in the middle of this cd command,
-// splitting it into independently-submitted fragments before the quoting
-// below even runs.
+// Control characters are stripped here, once, ahead of the per-dialect
+// quoting below — see stripControlChars.
 func (d shellDialect) cdPrefix(dir string) string {
-	dir = strings.ReplaceAll(dir, "\r", "")
-	dir = strings.ReplaceAll(dir, "\n", "")
+	dir = stripControlChars(dir)
 	switch d {
 	case dialectCmd:
 		// cmd's bare `cd` will not cross drives: `cd D:\x` from C: changes
@@ -167,6 +182,19 @@ func (d shellDialect) cdPrefix(dir string) string {
 // instead of a child scope that disappears once the block returns — "&"
 // would silently make e.g. an exported variable invisible to whatever the
 // user types next in that terminal.
+//
+// Known limitation (cmd.exe only): wrapping in "( ... )" makes cmd.exe
+// parse the whole parenthesized block before executing any of it, which is
+// also when it textually expands any %VAR% the script references — not
+// per-line, as it would for the same lines submitted unwrapped. A script
+// that reads a value expected to change partway through (%errorlevel%,
+// %random%, %date%/%time%, %cd% after an earlier `cd` in the same script)
+// silently gets the value from before the block started instead, only when
+// a working directory is configured (the case that triggers grouping at
+// all). The standard cmd.exe fix is `setlocal enabledelayedexpansion` plus
+// rewriting %VAR% to !VAR!, but auto-injecting that would change semantics
+// for scripts that already rely on the classic %VAR% behavior elsewhere in
+// the same block, so it isn't done here.
 func (d shellDialect) groupDelims() (string, string) {
 	switch d {
 	case dialectCmd:
@@ -244,7 +272,15 @@ func buildCommandLine(shellPath, script, workingDir string) string {
 	suffix := ""
 	if workingDir != "" {
 		prefix := d.cdPrefix(workingDir)
-		if strings.Contains(script, "\n") {
+		// A lone '\r' with no '\n' still submits its own line — on
+		// cmd.exe/PowerShell because '\r' literally IS the submit key, and
+		// on POSIX shells because readline's default keymap binds '\r' to
+		// accept-line exactly like '\n'. A script containing one (e.g. from
+		// an unsanitized template-variable value) must trigger the same
+		// grouping multi-line scripts get, or that later fragment would run
+		// as its own separately-submitted line, ungated by the cd check
+		// above — checking only for "\n" let such a script slip through.
+		if strings.ContainsAny(script, "\r\n") {
 			open, groupClose := d.groupDelims()
 			line = prefix + open + script
 			suffix = groupClose

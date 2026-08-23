@@ -508,6 +508,33 @@ func TestBuildCommandLine(t *testing.T) {
 			"posix wd with embedded LF has it stripped", "/bin/zsh", "echo hi", "/tmp/evil\ncalc",
 			"cd '/tmp/evilcalc' && echo hi\n",
 		},
+		{
+			// Not just '\r'/'\n': any C0 control byte is meaningful to the
+			// pty's line discipline or the shell's line editor (e.g. ^U
+			// kill-line, ^C SIGINT) BEFORE the shell's own quoting-aware
+			// parser ever sees the string, so those bytes could bypass
+			// shellQuoteDir/cmdQuoteDir/psQuoteDir entirely regardless of
+			// what they wrap the value in.
+			"posix wd with embedded control char (^U) has it stripped", "/bin/zsh", "echo hi", "/tmp/evil\x15calc",
+			"cd '/tmp/evilcalc' && echo hi\n",
+		},
+		{
+			"cmd wd with embedded control char (^C) has it stripped", cmdExe, "echo hi", "C:\\evil\x03calc.exe",
+			`cd /d "C:\evilcalc.exe" && echo hi` + "\r",
+		},
+		{
+			// A lone '\r' with no '\n' still submits its own line on every
+			// dialect (literally on cmd.exe/PowerShell; via readline's
+			// accept-line binding on POSIX) — checking only for "\n" would
+			// let this bypass grouping and run "command" as its own
+			// separately-submitted, cd-ungated line.
+			"posix script with lone CR (no LF) is still grouped when wd is set", "/bin/zsh", "some\rcommand", "/tmp/x",
+			"cd '/tmp/x' && { some\rcommand\n}\n",
+		},
+		{
+			"cmd script with lone CR (no LF) is still grouped when wd is set", cmdExe, "some\rcommand", `D:\work`,
+			"cd /d \"D:\\work\" && ( some\rcommand\r)\r",
+		},
 		{"bare cmd with no extension", "cmd", "echo hi", "", "echo hi\r"},
 		{"case-insensitive CMD.EXE", `C:\Windows\System32\CMD.EXE`, "echo hi", "", "echo hi\r"},
 		{"unix-style pwsh path", "/usr/local/bin/pwsh", "echo hi", "", "echo hi\r"},
