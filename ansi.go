@@ -147,13 +147,16 @@ func stripANSI(s string, cols int) string {
 	s = removeWrapArtifacts(s, cols)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 
-	var b strings.Builder
-	b.Grow(len(s))
+	buf := make([]byte, 0, len(s))
+	lineStart := 0 // index into buf where the current physical line began
 
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c != escByte {
-			b.WriteByte(c)
+			buf = append(buf, c)
+			if c == '\n' {
+				lineStart = len(buf)
+			}
 			continue
 		}
 
@@ -168,8 +171,28 @@ func stripANSI(s string, cols int) string {
 			for j < len(s) && (s[j] >= csiParamLo && s[j] <= csiParamHi) {
 				j++
 			}
+			var param string
+			var final byte
 			if j < len(s) && s[j] >= csiFinalLo && s[j] <= csiFinalHi {
+				param = s[i+escSeqIntroLen : j]
+				final = s[j]
 				j++
+			}
+			// EL (Erase in Line) mode 2 clears the WHOLE line, independent of
+			// cursor column — the one erase-in-line mode whose effect doesn't
+			// depend on where the cursor is, so it's the one safe to act on
+			// without tracking cursor column in general. A progress bar or
+			// spinner erasing itself with "content\r\x1b[2K" must not leave
+			// "content" as the last visible line: once the CSI bytes are
+			// stripped, that pattern is byte-for-byte indistinguishable from
+			// a bare trailing '\r' with nothing typed after it — the ConPTY
+			// repaint case collapseCarriageReturns' doc comment deliberately
+			// preserves — so only a "\r" immediately followed by this exact
+			// erase (nothing typed in between) is treated as clearing the
+			// line; a 2K with no preceding '\r', or with real text after the
+			// '\r', is left to whatever was already written, unaffected.
+			if final == 'K' && param == "2" && len(buf) > 0 && buf[len(buf)-1] == '\r' {
+				buf = buf[:lineStart]
 			}
 			i = j - 1
 		case ']': // OSC
@@ -191,9 +214,7 @@ func stripANSI(s string, cols int) string {
 		}
 	}
 
-	stripped := b.String()
-
-	lines := strings.Split(stripped, "\n")
+	lines := strings.Split(string(buf), "\n")
 	for idx, line := range lines {
 		lines[idx] = collapseCarriageReturns(line)
 	}

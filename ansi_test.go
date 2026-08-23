@@ -174,6 +174,33 @@ func TestStripANSI(t *testing.T) {
 			cols: 80,
 			want: "",
 		},
+		{
+			// A spinner/progress bar erasing its own line before printing
+			// nothing further: "\r\x1b[2K" always means the line is now
+			// blank, not "content" — unlike the bare-trailing-CR case above,
+			// where nothing tells us the line was ever cleared.
+			name: "CR followed by full-line erase wipes the line",
+			in:   "content\r\x1b[2K",
+			cols: 80,
+			want: "",
+		},
+		{
+			// The erase is followed by real replacement text on the same
+			// line — the erased line must not resurrect the erased content.
+			name: "CR followed by full-line erase then new text keeps only the new text",
+			in:   "old status\r\x1b[2Knew status",
+			cols: 80,
+			want: "new status",
+		},
+		{
+			// \x1b[2K with no preceding CR is just another CSI code being
+			// stripped, same as any other cursor/erase command — it must
+			// not retroactively wipe text already written on the line.
+			name: "full-line erase without a preceding CR does not wipe prior text",
+			in:   "a\x1b[2K\x1b[1Gb",
+			cols: 80,
+			want: "ab",
+		},
 	}
 
 	for _, tt := range tests {
