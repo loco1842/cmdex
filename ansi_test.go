@@ -201,6 +201,32 @@ func TestStripANSI(t *testing.T) {
 			cols: 80,
 			want: "ab",
 		},
+		{
+			// \x1b[K (no param, i.e. default mode 0: erase cursor-to-end)
+			// right after a bare CR has the same visible effect as \x1b[2K
+			// there, because the CR already put the cursor at column 0 — so
+			// this common spinner form ("content\r\x1b[K") must also wipe
+			// the line rather than leaving "content" behind.
+			name: "CR followed by default-mode erase wipes the line",
+			in:   "content\r\x1b[K",
+			cols: 80,
+			want: "",
+		},
+		{
+			name: "CR followed by explicit mode-0 erase wipes the line",
+			in:   "content\r\x1b[0K",
+			cols: 80,
+			want: "",
+		},
+		{
+			// Mode 1 (erase start-of-line to cursor) is NOT equivalent to
+			// mode 0/2 at column 0 in the general case and must not trigger
+			// the same whole-line clear.
+			name: "CR followed by mode-1 erase does not wipe the line",
+			in:   "content\r\x1b[1K",
+			cols: 80,
+			want: "content",
+		},
 	}
 
 	for _, tt := range tests {

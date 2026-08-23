@@ -177,20 +177,27 @@ func stripANSI(s string, cols int) string {
 				final = s[j]
 				j++
 			}
-			// EL (Erase in Line) mode 2 clears the WHOLE line, independent of
-			// cursor column — the one erase-in-line mode whose effect doesn't
-			// depend on where the cursor is, so it's the one safe to act on
-			// without tracking cursor column in general. A progress bar or
-			// spinner erasing itself with "content\r\x1b[2K" must not leave
-			// "content" as the last visible line: once the CSI bytes are
-			// stripped, that pattern is byte-for-byte indistinguishable from
-			// a bare trailing '\r' with nothing typed after it — the ConPTY
-			// repaint case collapseCarriageReturns' doc comment deliberately
-			// preserves — so only a "\r" immediately followed by this exact
-			// erase (nothing typed in between) is treated as clearing the
-			// line; a 2K with no preceding '\r', or with real text after the
-			// '\r', is left to whatever was already written, unaffected.
-			if final == 'K' && param == "2" && len(buf) > 0 && buf[len(buf)-1] == '\r' {
+			// EL (Erase in Line) modes 0 (default/no param) and 2 both clear
+			// the WHOLE line here, even though in general EL0 only erases
+			// from the cursor to end of line: a bare '\r' immediately before
+			// puts the cursor at column 0, so "cursor to end" already covers
+			// the entire line, same as mode 2's unconditional whole-line
+			// erase. Mode 1 (erase start-of-line to cursor) is deliberately
+			// excluded — at column 0 it would erase nothing anyway, but more
+			// importantly a bare '\r' doesn't imply mode-1 semantics the way
+			// it does for 0/2. A progress bar or spinner erasing itself with
+			// "content\r\x1b[K" (the common default form) or
+			// "content\r\x1b[2K" must not leave "content" as the last visible
+			// line: once the CSI bytes are stripped, that pattern is
+			// byte-for-byte indistinguishable from a bare trailing '\r' with
+			// nothing typed after it — the ConPTY repaint case
+			// collapseCarriageReturns' doc comment deliberately preserves —
+			// so only a "\r" immediately followed by this exact erase
+			// (nothing typed in between) is treated as clearing the line; a
+			// K with no preceding '\r', or with real text after the '\r', is
+			// left to whatever was already written, unaffected.
+			if final == 'K' && (param == "" || param == "0" || param == "2") && len(buf) > 0 &&
+				buf[len(buf)-1] == '\r' {
 				buf = buf[:lineStart]
 			}
 			i = j - 1
