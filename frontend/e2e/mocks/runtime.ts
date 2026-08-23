@@ -407,8 +407,10 @@ const handlers: Record<number, (...args: any[]) => any> = {
   },
 
   // Start(sessionId, cols, rows)
-  3774501399: () => {
+  3774501399: (sessionId: string) => {
     terminalCallCounts.Start++;
+    const s = terminalSessions.find((s) => s.id === sessionId);
+    if (s) s.running = true;
   },
 
   // Stop(sessionId)

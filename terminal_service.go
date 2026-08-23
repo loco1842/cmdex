@@ -126,12 +126,19 @@ type sessionState struct {
 	// holds capMu at that point, and acquiring mu there too would invert
 	// that ordering and risk deadlock. An independent atomic sidesteps both
 	// problems.
-	capCols       atomic.Uint32
-	capMu         sync.Mutex
-	capBuf        bytes.Buffer
-	capCarry      []byte
-	capturing     bool
-	capTruncated  bool
+	capCols atomic.Uint32
+	capMu   sync.Mutex
+	capBuf  bytes.Buffer
+	// capCaptureCols snapshots capCols when a "C" marker opens a capture, so
+	// the "D" marker's stripANSI call uses the width active while THIS
+	// command's output was actually emitted rather than whatever capCols has
+	// drifted to from a Resize that happened mid-command (see captureScan in
+	// terminal_capture.go). Guarded by capMu like the rest of the capture
+	// state, since it's only ever touched from within captureScan/GetLastOutput.
+	capCaptureCols int
+	capCarry       []byte
+	capturing      bool
+	capTruncated   bool
 	lastOutput    string
 	lastExitCode  int
 	lastTruncated bool

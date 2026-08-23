@@ -3,6 +3,7 @@ package main
 import (
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // removeWrapArtifacts strips the exact byte pattern Windows ConPTY injects
@@ -39,7 +40,10 @@ import (
 // escape are identical, which is what makes it safe to drop one copy rather
 // than a guess: if they don't match, nothing is dropped, erring toward
 // keeping a real character over risking one that happens to abut the
-// pattern by coincidence.
+// pattern by coincidence. The comparison decodes full UTF-8 runes rather
+// than raw bytes on either side, since the boundary character can be
+// multi-byte (e.g. an accented letter); comparing single bytes would compare
+// unrelated continuation bytes and never recognize the duplicate.
 func removeWrapArtifacts(s string, cols int) string {
 	if cols <= 0 {
 		return s
@@ -51,8 +55,12 @@ func removeWrapArtifacts(s string, cols int) string {
 
 	for i := 0; i < len(s); {
 		if j, ok := matchWrapArtifact(s, i, colStr); ok {
-			if i > 0 && j < len(s) && s[i-1] == s[j] {
-				j++
+			if i > 0 && j < len(s) {
+				prevRune, _ := utf8.DecodeLastRuneInString(s[:i])
+				nextRune, nextSize := utf8.DecodeRuneInString(s[j:])
+				if prevRune != utf8.RuneError && prevRune == nextRune {
+					j += nextSize
+				}
 			}
 			i = j
 			continue

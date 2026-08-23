@@ -268,6 +268,34 @@ func TestCaptureScan_EmptyNonceTrustsNoMarkers(t *testing.T) {
 	}
 }
 
+// TestCaptureScan_ResizeBeforeDUsesWidthAtCaptureStart covers a Resize
+// happening mid-command: the wrap-artifact bytes in the captured output were
+// emitted by the shell at the terminal's width when the command STARTED, so
+// stripping them at "D" time must use that width, not whatever the terminal
+// has since been resized to.
+func TestCaptureScan_ResizeBeforeDUsesWidthAtCaptureStart(t *testing.T) {
+	ss := newCaptureTestSession()
+	ss.capCols.Store(80)
+	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07occaeca\r\n\x1b[23;80Hati aliquam"))
+
+	// Simulate Resize() being called while the command is still running.
+	ss.capCols.Store(40)
+
+	ss.captureScan([]byte("\x1b]133;D;test-nonce;0\x07"))
+
+	if !ss.lastValid {
+		t.Fatal("expected lastValid=true")
+	}
+	want := "occaecati aliquam"
+	if ss.lastOutput != want {
+		t.Errorf(
+			"lastOutput = %q, want %q (wrap artifact must be stripped using the width active when it was emitted)",
+			ss.lastOutput,
+			want,
+		)
+	}
+}
+
 func TestResetCapture_ClearsAllState(t *testing.T) {
 	ss := newCaptureTestSession()
 	ss.captureScan([]byte("\x1b]133;C;test-nonce\x07hello\x1b]133;D;test-nonce;1\x07"))

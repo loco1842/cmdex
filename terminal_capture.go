@@ -164,9 +164,10 @@ func (ss *sessionState) captureScan(data []byte) {
 			ss.capBuf.Reset()
 			ss.capTruncated = false
 			ss.capturing = true
+			ss.capCaptureCols = int(ss.capCols.Load())
 		case 'D':
 			if ss.capturing {
-				ss.lastOutput = stripANSI(ss.capBuf.String(), int(ss.capCols.Load()))
+				ss.lastOutput = stripANSI(ss.capBuf.String(), ss.capCaptureCols)
 				ss.lastExitCode = parseExitCode(params)
 				ss.lastTruncated = ss.capTruncated
 				ss.lastValid = true

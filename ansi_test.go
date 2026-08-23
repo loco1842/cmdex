@@ -131,6 +131,16 @@ func TestStripANSI(t *testing.T) {
 			cols: 0,
 			want: "abc\ndef",
 		},
+		{
+			// The wrap boundary can land on a multi-byte UTF-8 rune (e.g. an
+			// accented letter). The dedup must compare decoded runes, not
+			// raw bytes, or it fails to recognize the duplicate and leaves
+			// it in the output.
+			name: "duplicated multibyte UTF-8 boundary rune dropped",
+			in:   "café \xc3\xa9\r\n\x1b[5;80H\xc3\xa9clair",
+			cols: 80,
+			want: "café \xc3\xa9clair",
+		},
 	}
 
 	for _, tt := range tests {
