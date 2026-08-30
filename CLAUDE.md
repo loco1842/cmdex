@@ -33,8 +33,8 @@ make fmt                  # golangci-lint fmt (goimports + golines) + pnpm lint:
 make lint                 # golangci-lint run + pnpm lint  (same configs CI uses; fails on findings)
 make lint-fix             # golangci-lint run --fix + pnpm lint:fix
 
-# Tests (Go, then Playwright e2e)
-make test                 # go test ./... && cd frontend && pnpm test:e2e
+# Tests (Go, then frontend Vitest unit tests, then Playwright e2e)
+make test                 # go test ./... && cd frontend && pnpm test && pnpm test:e2e
 
 # Clean build artifacts
 make clean                # removes bin/ and frontend/dist/, then restores the
@@ -45,7 +45,7 @@ make clean                # removes bin/ and frontend/dist/, then restores the
 cd frontend && pnpm install
 ```
 
-**Tests:** Go tests run via `go test ./...` (see the file list under **Tests** below); frontend Playwright e2e tests via `cd frontend && pnpm test:e2e`. CI's `test` and `test-windows` jobs run `go test -race ./...` and gate the run on failure. `make check` runs `go build ./...` + `pnpm tsc --noEmit`, while CI's `typecheck` job additionally runs both linters as a separate, faster gate. CI never invokes the Makefile — `make check`/`fmt`/`lint` are local conveniences that mirror its individual steps.
+**Tests:** Go tests run via `go test ./...` (see the file list under **Tests** below); frontend unit tests via `cd frontend && pnpm test` (Vitest, covers pure logic in `src/utils`/`src/lib`); frontend Playwright e2e tests via `cd frontend && pnpm test:e2e`. CI's `typecheck` and `e2e` jobs run on every push/PR (type checks + lint, and Vitest + Playwright, respectively); `go-test` and `test-windows` (both `go test -race ./...`) and `build-check` are gated to manual `workflow_dispatch` runs, not triggered on every PR. `make check` runs `go build ./...` + `pnpm tsc --noEmit`, while CI's `typecheck` job additionally runs both linters as a separate, faster gate. CI never invokes the Makefile — `make check`/`fmt`/`lint` are local conveniences that mirror its individual steps.
 
 ## Architecture
 

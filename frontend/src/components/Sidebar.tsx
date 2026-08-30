@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import {
   DndContext,
   DragOverlay,
@@ -99,6 +100,7 @@ const SortableCommandItem: React.FC<SortableCommandItemProps> = ({
       ref={setNodeRef}
       style={style}
       className={`command-item ${isSelected ? 'active' : ''} ${isDragging ? 'dragging' : ''}`}
+      data-testid={`command-item-${cmd.id}`}
       {...attributes}
       {...listeners}
       onClick={onSelect}
@@ -387,7 +389,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           <ContextMenuItem onSelect={async () => {
                             try {
                               await ExportCommands(commands.filter(c => c.categoryId === cat.id).map(c => c.id));
-                            } catch (e) { console.error('Export failed:', e); }
+                            } catch (e) { console.error('Export failed:', e); toast.error(t('toast.exportFailed')); }
                           }}>
                             <Download className="size-3.5" /> {t('sidebar.exportCommands')}
                           </ContextMenuItem>
@@ -395,7 +397,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             try {
                               const imported = await ImportCommands();
                               if (imported && imported.length > 0 && onImport) onImport();
-                            } catch (e) { console.error('Import failed:', e); }
+                            } catch (e) { console.error('Import failed:', e); toast.error(t('toast.importFailed')); }
                           }}>
                             <Upload className="size-3.5" /> {t('sidebar.importCommands')}
                           </ContextMenuItem>
@@ -505,7 +507,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <ContextMenuItem onSelect={async () => {
               try {
                 await ExportCommands(commands.map(c => c.id));
-              } catch (e) { console.error('Export failed:', e); }
+              } catch (e) { console.error('Export failed:', e); toast.error(t('toast.exportFailed')); }
             }}>
               <Download className="size-3.5" /> {t('sidebar.exportCommands')}
             </ContextMenuItem>
@@ -513,7 +515,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               try {
                 const imported = await ImportCommands();
                 if (imported && imported.length > 0 && onImport) onImport();
-              } catch (e) { console.error('Import failed:', e); }
+              } catch (e) { console.error('Import failed:', e); toast.error(t('toast.importFailed')); }
             }}>
               <Upload className="size-3.5" /> {t('sidebar.importCommands')}
             </ContextMenuItem>
@@ -536,7 +538,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         const catToDelete = categories.find(c => c.id === pendingDeleteCat);
         return (
           <AlertDialog open={pendingDeleteCat !== null} onOpenChange={(open) => { if (!open) setPendingDeleteCat(null); }}>
-            <AlertDialogContent className="max-w-xs" data-testid="confirm-dialog">
+            <AlertDialogContent className="max-w-xs" data-testid="confirm-delete-category-dialog">
               <AlertDialogHeader>
                 <AlertDialogTitle>{t('sidebar.deleteCategory')}</AlertDialogTitle>
                 <AlertDialogDescription>
@@ -544,12 +546,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel data-testid="confirm-dialog-cancel" onClick={() => setPendingDeleteCat(null)}>
+                <AlertDialogCancel data-testid="confirm-delete-category-cancel" onClick={() => setPendingDeleteCat(null)}>
                   {t('common.cancel')}
                 </AlertDialogCancel>
                 <AlertDialogAction
                   variant="destructive"
-                  data-testid="confirm-dialog-confirm"
+                  data-testid="confirm-delete-category-confirm"
                   onClick={() => {
                     if (pendingDeleteCat) onDeleteCategory(pendingDeleteCat);
                     setPendingDeleteCat(null);

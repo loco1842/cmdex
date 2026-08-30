@@ -1,21 +1,28 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import CommandDetail from './CommandDetail';
 import FloatingSaveBar from './FloatingSaveBar';
 import type { Command, TabDraft, VariablePrompt, OSPathMap, OSKey } from '../types';
+import { makePlaceholderCommand } from '../utils/tabDraft';
+import { variableDefinitionsToPrompts } from '../utils/templateVars';
 
 interface CommandDetailTabProps {
   tabId: string;
-  command: Command;
+  /** The saved Command, or null for a not-yet-created tab (isTabNew) — a
+   * placeholder is built internally below so its reference stays stable. */
+  command: Command | null;
   draft: TabDraft;
   baseline: TabDraft | undefined;
   isTabNew: boolean;
   isTabActive: boolean;
   isTabDirty: boolean;
   isExecuting: boolean;
+  /** Server-resolved variable prompts (CEL defaults evaluated). Only meaningful
+   * — and only read — while this tab is active; an inactive tab derives its own
+   * stable prompts from draft.variables instead (see tabVariables below). */
   variables: VariablePrompt[];
   currentOS: OSKey;
   defaultWorkingDir: OSPathMap;
-  onDraftChange: (partial: Partial<TabDraft>) => void;
+  onDraftChange: (tabId: string, partial: Partial<TabDraft>) => void;
   onExecute: (tabId: string, values: Record<string, string>) => void;
   onFillVariables: (tabId: string, initialValues: Record<string, string>) => void;
   onRenamePreset: (tabId: string, presetId: string, newName: string) => Promise<void>;
@@ -25,8 +32,8 @@ interface CommandDetailTabProps {
   onReorderPresets: (tabId: string, presetIds: string[]) => Promise<void>;
   onSaveScript: (tabId: string, scriptBody: string) => Promise<void>;
   onResolvedValuesChange?: (values: Record<string, string>) => void;
-  onSave: () => void;
-  onDiscard: () => void;
+  onSave: (tabId: string) => void;
+  onDiscard: (tabId: string) => void;
 }
 
 const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetailTab({
@@ -87,9 +94,31 @@ const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetai
     [tabId, onSaveScript],
   );
   const boundDraftChange = useCallback(
-    (partial: Partial<TabDraft>) => onDraftChange({ ...partial }),
-    [onDraftChange],
+    (partial: Partial<TabDraft>) => onDraftChange(tabId, partial),
+    [tabId, onDraftChange],
   );
+  const boundSave = useCallback(() => onSave(tabId), [tabId, onSave]);
+  const boundDiscard = useCallback(() => onDiscard(tabId), [tabId, onDiscard]);
+
+  // Built here (not in App's render loop) so the reference is stable across
+  // unrelated App renders — keyed on tabId + categoryId (both primitives, so
+  // useMemo's own dependency comparison is all the stability this needs).
+  const placeholderCommand = useMemo(
+    () => makePlaceholderCommand(tabId, draft.categoryId),
+    [tabId, draft.categoryId],
+  );
+  const resolvedCommand = isTabNew ? placeholderCommand : command;
+
+  // Same reasoning for an inactive tab's variable prompts: derive them from
+  // draft.variables (stable except at load/save) instead of recomputing a
+  // fresh array from the App-level tabDrafts object on every render.
+  const inactivePrompts = useMemo(
+    () => variableDefinitionsToPrompts(draft.variables),
+    [draft.variables],
+  );
+  const tabVariables = isTabActive ? variables : inactivePrompts;
+
+  if (!resolvedCommand) return null;
 
   return (
     <div
@@ -97,13 +126,13 @@ const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetai
       style={{ display: isTabActive ? 'flex' : 'none' }}
     >
       <CommandDetail
-        command={command}
+        command={resolvedCommand}
         draft={draft}
         baselineScriptBody={baseline?.scriptBody || ''}
         onDraftChange={boundDraftChange}
         isNewCommand={isTabNew}
         isExecuting={isExecuting}
-        variables={variables}
+        variables={tabVariables}
         onExecute={boundExecute}
         onFillVariables={boundFillVariables}
         onRenamePreset={boundRenamePreset}
@@ -119,8 +148,8 @@ const CommandDetailTab = React.memo<CommandDetailTabProps>(function CommandDetai
       <FloatingSaveBar
         visible={isTabDirty}
         saveDisabled={!draft || !draft.scriptBody.trim()}
-        onSave={onSave}
-        onDiscard={onDiscard}
+        onSave={boundSave}
+        onDiscard={boundDiscard}
       />
     </div>
   );

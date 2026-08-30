@@ -133,7 +133,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   if (!open) return null;
 
   return (
-    <div className="palette-overlay" onMouseDown={onClose}>
+    <div className="palette-overlay" data-testid="command-palette" onMouseDown={onClose}>
       <div className="palette-modal" onMouseDown={(e) => e.stopPropagation()}>
 
         {/* Search row */}
@@ -142,6 +142,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
           <input
             ref={inputRef}
             className="palette-input"
+            data-testid="palette-input"
             placeholder="Search commands…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -162,7 +163,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
         {/* Results */}
         <div className="palette-results" ref={listRef}>
           {filtered.length === 0 ? (
-            <div className="palette-empty">No commands match "{query}"</div>
+            <div className="palette-empty" data-testid="palette-empty">No commands match "{query}"</div>
           ) : (
             filtered.map((cmd, i) => {
               const catName = cmd.categoryId ? catMap[cmd.categoryId] : null;
@@ -171,6 +172,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
                 <div
                   key={cmd.id}
                   data-idx={i}
+                  data-testid={`palette-item-${cmd.id}`}
                   className={`palette-item${isActive ? ' active' : ''}`}
                   onMouseEnter={() => setActiveIndex(i)}
                   onClick={() => { onOpen(cmd); onClose(); }}

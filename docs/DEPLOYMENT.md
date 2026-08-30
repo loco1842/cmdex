@@ -25,15 +25,25 @@ Two workflows drive the build and release process:
 
 ### CI Workflow (`.github/workflows/ci.yml`)
 
-Triggers on every push or pull request to `main`.
+The workflow triggers on every push or pull request to `main`, but not every job in it runs automatically — only `typecheck` and `e2e` do. The rest (`go-test`, `test-windows`, `build-check`) are gated to `workflow_dispatch` (manual trigger) and must be run explicitly.
 
-- **Type Check Job** (`ubuntu-latest`)
-  - Installs Go (version from `go.mod`), Node.js 24, pnpm, and Linux build dependencies (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`).
+- **Type Check Job** (`ubuntu-latest`) — runs on every push/PR
+  - Installs Go (version from `go.mod`), Node.js 24, pnpm, and Linux build dependencies (`libgtk-4-dev`, `libwebkitgtk-6.0-dev`).
   - Installs Wails v3 CLI (`v3.0.0-beta.12`).
   - Generates Wails bindings and runs `pnpm tsc --noEmit`.
   - Runs `go build ./...` to verify compilation.
 
-- **Build Check Job** (matrix: `ubuntu-24.04`, `macos-latest`, `windows-latest`)
+- **e2e Job** (`ubuntu-latest`) — runs on every push/PR
+  - Generates Wails bindings, then runs the frontend Vitest unit suite (`pnpm test`) and the Playwright e2e suite (`pnpm test:e2e`, Chromium only).
+  - Uploads the Playwright HTML report as an artifact on failure.
+
+- **go-test Job** (`ubuntu-latest`) — `workflow_dispatch` only
+  - Runs `go test -race ./...`.
+
+- **test-windows Job** (`windows-latest`) — `workflow_dispatch` only
+  - Runs `go test -race ./...` on Windows, exercising the real ConPTY backend.
+
+- **Build Check Job** (matrix: `ubuntu-24.04`, `macos-latest`, `windows-latest`) — `workflow_dispatch` only
   - Installs platform-specific dependencies (NSIS on Windows via Chocolatey).
   - Caches the Wails CLI, frontend build artifacts (`frontend/dist`, `frontend/bindings`), and APT packages.
   - Runs `task build` to produce a working binary on each OS.

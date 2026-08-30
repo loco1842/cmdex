@@ -12,6 +12,7 @@ type EventNames struct {
 	OpenShortcuts         string `json:"openShortcuts"`
 	SettingsChanged       string `json:"settingsChanged"`
 	SettingsWindowClosing string `json:"settingsWindowClosing"`
+	DataReset             string `json:"dataReset"`
 }
 
 var eventNames = EventNames{
@@ -19,6 +20,7 @@ var eventNames = EventNames{
 	OpenShortcuts:         "open-shortcuts",
 	SettingsChanged:       "settings-changed",
 	SettingsWindowClosing: "settings-window-closing",
+	DataReset:             "data-reset",
 }
 
 // EventService exposes event name constants to the frontend.

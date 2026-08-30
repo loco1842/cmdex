@@ -50,4 +50,16 @@ export default defineConfig(
     files: ['**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
   },
+
+  {
+    // Playwright fixtures (e2e/fixtures.ts) destructure a `use` callback per
+    // the Playwright fixture API (`async ({ page }, use) => { await use(...) }`)
+    // — react-hooks' rules-of-hooks sees `use(...)` and assumes it's React 19's
+    // `use()` hook called outside a component/hook. This is plain test
+    // infrastructure, not React code, so the react-hooks rules don't apply.
+    files: ['e2e/**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
+    },
+  },
 );

@@ -10,6 +10,9 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
@@ -55,7 +58,8 @@
     "globals": "^17.11.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.67.0",
-    "vite": "^8.2.1"
+    "vite": "^8.2.1",
+    "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@11.22.0+sha512.1ff870c4c6133dfd88fb2afc46dd13d47f09c9794b438c6fdb47ca98caf3bc16381ee0be93a091b8e3824cf01f889f46d7d9e20910fb0be1ab0fb5baa80dd621"
 }

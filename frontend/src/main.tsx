@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client'
 import './i18n'
 import './style.css'
 import { GetSettings, SetSettings } from '../bindings/cmdex/settingsservice'
+import { ResetAllData } from '../bindings/cmdex/commandservice'
 import { THEMES, type CustomTheme } from './types'
 import { Events } from '@wailsio/runtime'
 import { eventNames } from './wails/events'
@@ -137,6 +138,14 @@ if (isSettingsWindow) {
             persistSettings(newSettings)
         }, [syncCustomThemes, locale, theme, uiFont, monoFont, density, persistSettings, lastDarkTheme, lastLightTheme, windowX, windowY, windowWidth, windowHeight, handleThemeChange])
 
+        const handleResetAllData = useCallback(async () => {
+            await ResetAllData()
+            // db.ResetAll truncates app_settings too, so the main window is
+            // holding stale commands/categories *and* stale settings — tell it
+            // to reload both rather than requiring a restart.
+            Events.Emit(eventNames.dataReset)
+        }, [])
+
         return (
             <SettingsPage
                 theme={theme}
@@ -144,6 +153,7 @@ if (isSettingsWindow) {
                 customThemes={customThemes}
                 onImportTheme={handleImportTheme}
                 onRemoveCustomTheme={handleRemoveCustomTheme}
+                onResetAllData={handleResetAllData}
                 density={density}
                 uiFont={uiFont}
                 monoFont={monoFont}

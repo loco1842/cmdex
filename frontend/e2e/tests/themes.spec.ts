@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
-import '../utils/types';
+import { test, expect } from '../fixtures';
+import type { Page } from '@playwright/test';
 
 // A custom theme carries its colors in the settings payload; there is no
 // `[data-theme="custom-..."]` CSS rule, so they only take effect when the app
@@ -23,11 +23,13 @@ function rootVar(page: Page, name: string): Promise<string> {
   );
 }
 
-// The settings window emits `settings-changed` after a theme change; the
-// payload arrives wrapped in a WailsEvent, so the colors sit under `data`.
-// The app subscribes only once its async event-name lookup resolves, so wait
-// for the listener — emitting earlier drops the event and the assertions below
-// would then be waiting for something that can never arrive.
+// The settings window emits `settings-changed` with a raw payload
+// (main.tsx/SettingsPage.tsx call Events.Emit(name, settings) directly); the
+// runtime mock now wraps every Events.Emit in a WailsEvent envelope itself
+// (matching real Wails), so callers here pass the raw payload too. The app
+// subscribes only once its async event-name lookup resolves, so wait for the
+// listener — emitting earlier drops the event and the assertions below would
+// then be waiting for something that can never arrive.
 async function emitSettingsChanged(page: Page, data: Record<string, unknown>) {
   await expect
     .poll(() =>
@@ -35,26 +37,19 @@ async function emitSettingsChanged(page: Page, data: Record<string, unknown>) {
     )
     .toBe(true);
   await page.evaluate((payload) => {
-    window.__cmdexE2E?.emit('settings-changed', {
-      name: 'settings-changed',
-      data: payload,
-      sender: 'e2e',
-    });
+    window.__cmdexE2E?.emit('settings-changed', payload);
   }, data);
 }
 
 test.describe('Custom themes', () => {
-  test('applies the saved custom theme colors on load', async ({ page }) => {
-    await page.addInitScript((theme) => {
-      window.__cmdexE2E_SEED__ = {
-        settings: {
-          theme: theme.id,
-          customThemes: JSON.stringify([theme]),
-        },
-      };
-    }, CUSTOM_THEME);
-    await page.goto('/');
-    await expect(page.locator('.sidebar')).toBeVisible();
+  test('applies the saved custom theme colors on load', async ({ page, seed, gotoApp }) => {
+    await seed({
+      settings: {
+        theme: CUSTOM_THEME.id,
+        customThemes: JSON.stringify([CUSTOM_THEME]),
+      },
+    });
+    await gotoApp();
 
     await expect.poll(() => rootVar(page, '--background')).toBe('#101014');
     expect(await rootVar(page, '--primary')).toBe('#d2691e');
@@ -62,9 +57,8 @@ test.describe('Custom themes', () => {
     expect(await page.getAttribute('html', 'data-theme')).toBe(CUSTOM_THEME.id);
   });
 
-  test('applies a custom theme delivered via settings-changed', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.locator('.sidebar')).toBeVisible();
+  test('applies a custom theme delivered via settings-changed', async ({ page, gotoApp }) => {
+    await gotoApp();
     expect(await rootVar(page, '--background')).toBe('');
 
     await emitSettingsChanged(page, {
@@ -77,16 +71,14 @@ test.describe('Custom themes', () => {
     expect(await page.getAttribute('html', 'data-theme')).toBe(CUSTOM_THEME.id);
   });
 
-  test('clears custom colors when switching back to a built-in theme', async ({ page }) => {
-    await page.addInitScript((theme) => {
-      window.__cmdexE2E_SEED__ = {
-        settings: {
-          theme: theme.id,
-          customThemes: JSON.stringify([theme]),
-        },
-      };
-    }, CUSTOM_THEME);
-    await page.goto('/');
+  test('clears custom colors when switching back to a built-in theme', async ({ page, seed, gotoApp }) => {
+    await seed({
+      settings: {
+        theme: CUSTOM_THEME.id,
+        customThemes: JSON.stringify([CUSTOM_THEME]),
+      },
+    });
+    await gotoApp();
     await expect.poll(() => rootVar(page, '--background')).toBe('#101014');
 
     await emitSettingsChanged(page, { theme: 'vscode-light', customThemes: '[]' });
@@ -96,16 +88,14 @@ test.describe('Custom themes', () => {
     expect(await page.getAttribute('html', 'data-theme')).toBe('vscode-light');
   });
 
-  test('does not leak colors between two custom themes', async ({ page }) => {
-    await page.addInitScript((theme) => {
-      window.__cmdexE2E_SEED__ = {
-        settings: {
-          theme: theme.id,
-          customThemes: JSON.stringify([theme]),
-        },
-      };
-    }, CUSTOM_THEME);
-    await page.goto('/');
+  test('does not leak colors between two custom themes', async ({ page, seed, gotoApp }) => {
+    await seed({
+      settings: {
+        theme: CUSTOM_THEME.id,
+        customThemes: JSON.stringify([CUSTOM_THEME]),
+      },
+    });
+    await gotoApp();
     await expect.poll(() => rootVar(page, '--primary')).toBe('#d2691e');
 
     // The second theme omits `primary` and `status-bar-bg`; those must fall back

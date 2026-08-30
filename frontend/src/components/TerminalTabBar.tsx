@@ -97,6 +97,7 @@ function SortableTerminalTab({
           ref={setNodeRef}
           style={style}
           className={`tab-item${isActive ? ' active' : ''}`}
+          data-testid={`terminal-tab-${session.id}`}
           onClick={() => onSelect(session.id)}
         >
           <span className="tab-drag-handle" {...attributes} {...listeners}>
@@ -104,6 +105,7 @@ function SortableTerminalTab({
           </span>
           <span
             className={`tab-status-dot ${session.running ? 'running' : 'stopped'}`}
+            data-testid={`terminal-tab-status-${session.id}`}
           />
           {isRenaming ? (
             <input
@@ -196,7 +198,7 @@ export default function TerminalTabBar({
   const isLastTab = sessions.length <= 1;
 
   return (
-    <div className="tab-bar">
+    <div className="tab-bar" data-testid="terminal-tab-bar">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -225,6 +227,7 @@ export default function TerminalTabBar({
       </DndContext>
       <div
         className="tab-new-session-btn"
+        data-testid="terminal-new-session-btn"
         role="button"
         aria-label="Create new terminal session"
         title="New Session (Ctrl+T)"

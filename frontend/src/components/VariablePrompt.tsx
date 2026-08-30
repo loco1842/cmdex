@@ -245,20 +245,21 @@ const VariablePrompt: React.FC<VariablePromptProps> = ({
     <>
     {mode === 'fill' ? (
       <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-        <DialogContent className="max-w-sm p-0 gap-0">
+        <DialogContent className="max-w-sm p-0 gap-0" data-testid="fill-variables-dialog">
           <DialogHeader className="px-5 pt-5 pb-3">
             <DialogTitle className="text-base">{t('variablePrompt.fillTitle')}</DialogTitle>
             <DialogDescription className="sr-only">{t('variablePrompt.fillDescription')}</DialogDescription>
           </DialogHeader>
           <div className="vp-fill-vars px-5 pb-2">
             {variables.map((v, i) => (
-                <div key={v.name} className="vp-fill-row">
+                <div key={v.name} className="vp-fill-row" data-testid={`fill-var-row-${v.name}`}>
                   <div className="vp-fill-label">
                     <code className="vp-fill-varname">{v.name}</code>
                     {v.description && <span className="vp-fill-desc">{v.description}</span>}
                   </div>
                   <Input
                     className="vp-fill-input font-mono text-sm h-8"
+                    data-testid={`fill-var-input-${v.name}`}
                     placeholder={v.example ? `e.g. ${v.example}` : ''}
                     value={values[v.name] || ''}
                     onChange={(e) => setValues({ ...values, [v.name]: e.target.value })}
@@ -269,8 +270,8 @@ const VariablePrompt: React.FC<VariablePromptProps> = ({
               ))}
           </div>
           <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
-            <Button variant="ghost" size="sm" onClick={onCancel}>{t('variablePrompt.cancel')}</Button>
-            <Button variant="success" size="sm" onClick={handleSubmit}>
+            <Button variant="ghost" size="sm" onClick={onCancel} data-testid="fill-variables-cancel">{t('variablePrompt.cancel')}</Button>
+            <Button variant="success" size="sm" onClick={handleSubmit} data-testid="fill-variables-execute">
               <Play className="size-3.5" /> {t('variablePrompt.execute')}
             </Button>
           </div>

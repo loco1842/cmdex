@@ -32,10 +32,11 @@ const TabBar: React.FC<TabBarProps> = ({ tabs, activeTabId, onSelectTab, onClose
             key={tab.id}
             ref={isActive ? activeRef : null}
             className={`tab-item${isActive ? ' active' : ''}`}
+            data-testid={`tab-${tab.id}`}
             onClick={() => onSelectTab(tab.id)}
           >
             <span className="tab-title" title={tab.title}>{tab.title}</span>
-            {tab.isDirty && <span className="tab-dirty-dot" title="Unsaved changes" />}
+            {tab.isDirty && <span className="tab-dirty-dot" title="Unsaved changes" data-testid={`tab-dirty-dot-${tab.id}`} />}
             <span
               className="tab-close"
               role="button"

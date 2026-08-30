@@ -647,6 +647,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                       variant="destructive"
                       size="sm"
                       className="flex-1"
+                      data-testid="danger-zone-confirm"
                       onClick={async () => {
                         await onResetAllData();
                         GetSettings().then(s => {
@@ -676,6 +677,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                       variant="outline"
                       size="sm"
                       className="flex-1"
+                      data-testid="danger-zone-cancel"
                       onClick={() => setConfirmReset(false)}
                     >
                       {t('settings.resetConfirmNo')}
@@ -687,6 +689,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                   variant="outline"
                   size="sm"
                   className="mt-2 text-destructive border-destructive/40 hover:bg-destructive/10 w-full"
+                  data-testid="danger-zone-reset-button"
                   onClick={() => setConfirmReset(true)}
                 >
                   {t('settings.resetAllData')}

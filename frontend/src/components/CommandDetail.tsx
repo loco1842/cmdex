@@ -128,6 +128,7 @@ const HighlightedTextarea: React.FC<HighlightedTextareaProps> = ({
       <Textarea
         ref={textareaRef}
         className="highlighted-textarea-input"
+        data-testid={dataTestId ? `${dataTestId}-textarea` : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
@@ -188,6 +189,7 @@ const SortablePresetChip: React.FC<SortablePresetChipProps> = ({
       <div ref={setNodeRef} style={style}>
         <input
           className="preset-chip preset-chip-renaming"
+          data-testid={`preset-chip-rename-${id}`}
           autoFocus
           placeholder={presetNamePlaceholder}
           value={renamingDraft}
@@ -210,6 +212,7 @@ const SortablePresetChip: React.FC<SortablePresetChipProps> = ({
           <button
             type="button"
             className={`preset-chip${isActive ? ' active' : ''}`}
+            data-testid={`preset-chip-${id}`}
             onClick={onSelect}
             onDoubleClick={(e) => { e.preventDefault(); onDoubleClick(); }}
             onKeyDown={(e) => {
@@ -940,7 +943,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                 {scriptEditor && !isNewCommand && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-xs" onClick={discardScriptEdit}>
+                      <Button variant="ghost" size="icon-xs" data-testid="script-edit-discard-btn" onClick={discardScriptEdit}>
                         <X className="size-3.5 text-destructive" />
                       </Button>
                     </TooltipTrigger>
@@ -950,7 +953,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                 {hasScriptChanges && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-xs" onClick={saveScriptEdit}>
+                      <Button variant="ghost" size="icon-xs" data-testid="script-edit-save-btn" onClick={saveScriptEdit}>
                         <Check className="size-3.5 text-success" />
                       </Button>
                     </TooltipTrigger>
@@ -960,7 +963,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                 {!scriptEditor && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-xs" onClick={enterScriptEdit}>
+                      <Button variant="ghost" size="icon-xs" data-testid="script-edit-enter-btn" onClick={enterScriptEdit}>
                         <Pencil className="size-3.5" />
                       </Button>
                     </TooltipTrigger>
@@ -1087,6 +1090,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                 <button
                   type="button"
                   className="preset-chip preset-chip-add"
+                  data-testid="preset-chip-add"
                   onClick={async () => {
                     preAddPresetIdRef.current = selectedPresetId;
                     const hasValues = Object.values(resolvedValues).some((v) => v.trim());
@@ -1120,6 +1124,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                         </span>
                         <input
                           className={`preset-var-input preset-var-value${val ? '' : ' empty'}`}
+                          data-testid={`preset-var-input-${v.name}`}
                           autoComplete="off"
                           autoCorrect="off"
                           autoCapitalize="off"
@@ -1165,7 +1170,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                 <div className="command-text-box-header-actions" style={{ justifyContent: 'flex-end', padding: '4px 8px 8px' }}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-xs" onClick={() => setOverrides({})}>
+                      <Button variant="ghost" size="icon-xs" data-testid="preset-values-revert" onClick={() => setOverrides({})}>
                         <X className="size-3.5 text-destructive" />
                       </Button>
                     </TooltipTrigger>
@@ -1176,6 +1181,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
                       <Button
                         variant="ghost"
                         size="icon-xs"
+                        data-testid="preset-values-save"
                         onClick={async () => {
                           await onSavePresetValues(selectedPresetId, resolvedValues);
                           setOverrides({});
@@ -1202,15 +1208,16 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
           }
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent data-testid="confirm-delete-preset-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('commandDetail.deletePresetTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('commandDetail.deletePresetDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('commandDetail.cancel')}</AlertDialogCancel>
+            <AlertDialogCancel data-testid="confirm-delete-preset-cancel">{t('commandDetail.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
+              data-testid="confirm-delete-preset-confirm"
               onClick={async () => {
                 const id = deletingPresetId || confirmDeletePresetId;
                 if (id) {
@@ -1231,18 +1238,21 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
         open={showScriptDiscardConfirm}
         onOpenChange={(open) => { if (!open) setShowScriptDiscardConfirm(false); }}
       >
-        <AlertDialogContent>
+        {/* NOTE: button semantics here are inverted from what "Cancel"/"Action"
+            normally imply — Cancel discards the pending script edit, Action
+            saves it. Tests must not assume Cancel is a no-op. */}
+        <AlertDialogContent data-testid="script-discard-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('app.discardTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('app.discardDescription')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
+            <AlertDialogCancel data-testid="script-discard-discard" onClick={() => {
               discardScriptEdit();
             }}>
               {t('commandEditor.discard')}
             </AlertDialogCancel>
-            <AlertDialogAction onClick={() => {
+            <AlertDialogAction data-testid="script-discard-save" onClick={() => {
               saveScriptEdit();
             }}>
               {t('commandDetail.saveScript')}
@@ -1252,7 +1262,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
       </AlertDialog>
 
       <Dialog open={workingDirDialogOpen} onOpenChange={setWorkingDirDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md" data-testid="working-directory-dialog">
           <DialogHeader>
             <DialogTitle>{t('commandDetail.workingDirectoryDialogTitle')}</DialogTitle>
             <DialogDescription>
@@ -1262,6 +1272,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
           <div className="flex items-center gap-2 py-2">
             <input
               type="text"
+              data-testid="working-directory-input"
               value={workingDirDraft}
               onChange={(e) => setWorkingDirDraft(e.target.value)}
               placeholder={commandWD ? t('commandDetail.workingDirectoryPlaceholder') : (defaultWD || t('commandDetail.workingDirectoryPlaceholder'))}
@@ -1271,6 +1282,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
               type="button"
               variant="outline"
               size="sm"
+              data-testid="working-directory-browse"
               onClick={async () => {
                 if (currentOS === 'unknown') return;
                 try {
@@ -1293,6 +1305,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
               type="button"
               variant="ghost"
               size="sm"
+              data-testid="working-directory-clear"
               onClick={() => {
                 setWorkingDirDraft('');
               }}
@@ -1302,6 +1315,7 @@ const CommandDetail: React.FC<CommandDetailProps> = ({
             <Button
               type="button"
               size="sm"
+              data-testid="working-directory-apply"
               disabled={currentOS === 'unknown'}
               onClick={() => {
                 if (currentOS === 'unknown') return;

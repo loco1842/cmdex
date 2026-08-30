@@ -21,12 +21,18 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // Pinned rather than left to the device default: ResizablePanel
+    // auto-collapses the sidebar at innerWidth <= 600 (ResizablePanel.tsx),
+    // and the terminal panel's default height is derived once from
+    // window.innerHeight at mount (App.tsx). A narrow or short viewport
+    // would silently break sidebar/terminal assertions in unrelated specs.
+    viewport: { width: 1440, height: 900 },
   },
 
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
     },
   ],
 

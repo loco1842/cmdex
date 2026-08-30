@@ -110,6 +110,10 @@ const FONT_SANS_KEY = 'cmdex-ui-font';
 const FONT_MONO_KEY = 'cmdex-mono-font';
 const DENSITY_KEY = 'cmdex-density';
 
+// Stable empty array so an inactive tab with no variables gets the same
+// reference on every render instead of a fresh `[]` (which would defeat
+// CommandDetailTab's React.memo).
+const EMPTY_VARIABLES: VarPromptType[] = [];
 
 function App() {
     const { t } = useTranslation();
@@ -554,9 +558,10 @@ function App() {
             return (cmds as Command[]) || [];
         } catch (err) {
             console.error('Failed to load data:', err);
+            toast.error(t('toast.loadDataFailed'));
             return [] as Command[];
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         /* eslint-disable react-hooks/set-state-in-effect -- one-time init data loading */
@@ -738,6 +743,47 @@ function App() {
         return cleanup;
     }, [eventsInitialized]);
 
+    useEffect(() => {
+        if (!eventsInitialized) return;
+        // db.ResetAll (triggered from the settings window's Danger Zone)
+        // truncates every table, including app_settings — so both the command
+        // library and every setting are stale here and must be reloaded, and
+        // every open tab/draft refers to a command that no longer exists.
+        const cleanup = Events.On(eventNames.dataReset, () => {
+            loadData();
+            setSelectedCommand(null);
+            setOpenTabs([]);
+            setActiveTabId(null);
+            setTabDrafts({});
+            setTabBaselines({});
+            GetSettings()
+                .then((s) => {
+                    if (!s) return;
+                    settingsRef.current = {
+                        ...settingsRef.current,
+                        locale: s.locale || 'en',
+                        theme: s.theme || 'vscode-dark',
+                        lastDarkTheme: s.lastDarkTheme || 'vscode-dark',
+                        lastLightTheme: s.lastLightTheme || 'vscode-light',
+                        customThemes: [],
+                        uiFont: s.uiFont || 'Inter',
+                        monoFont: s.monoFont || 'JetBrains Mono',
+                        density: s.density || 'comfortable',
+                        defaultWorkingDir: s.defaultWorkingDir || {},
+                    };
+                    if (s.locale) i18n.changeLanguage(s.locale);
+                    setCustomThemes([]);
+                    setTheme(s.theme || 'vscode-dark');
+                    setUiFont(s.uiFont || 'Inter');
+                    setMonoFont(s.monoFont || 'JetBrains Mono');
+                    setDensity(s.density || 'comfortable');
+                    setDefaultWorkingDir(s.defaultWorkingDir || {});
+                })
+                .catch(() => {});
+        });
+        return cleanup;
+    }, [eventsInitialized, loadData]);
+
     const updateDraft = useCallback((tabId: string, partial: Partial<TabDraft>) => {
         setTabDrafts((prev) => {
             const cur = prev[tabId];
@@ -873,7 +919,11 @@ function App() {
     const handleSaveTab = useCallback(
         async (tabId: string) => {
             const d = tabDraftsRef.current[tabId];
-            if (!d || !d.scriptBody.trim()) return;
+            if (!d) return;
+            if (!d.scriptBody.trim()) {
+                toast.message(t('toast.emptyScriptCannotSave'));
+                return;
+            }
             const title = d.title.trim();
             const description = d.description.trim();
             const body = d.scriptBody.replace(/^\s+|\s+$/g, '');
@@ -953,6 +1003,7 @@ function App() {
                 }
             } catch (err) {
                 console.error('Failed to save command:', err);
+                toast.error(t('toast.commandSaveFailed'));
             }
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
@@ -1029,6 +1080,7 @@ function App() {
             toast.success(t('toast.categoryCreated'));
         } catch (err) {
             console.error('Failed to create category:', err);
+            toast.error(t('toast.categoryCreateFailed'));
         }
     };
 
@@ -1041,6 +1093,7 @@ function App() {
             toast.success(t('toast.categorySaved'));
         } catch (err) {
             console.error('Failed to update category:', err);
+            toast.error(t('toast.categoryUpdateFailed'));
         }
     };
 
@@ -1054,6 +1107,7 @@ function App() {
             toast.success(t('toast.categoryDeleted'));
         } catch (err) {
             console.error('Failed to delete category:', err);
+            toast.error(t('toast.categoryDeleteFailed'));
         }
     };
 
@@ -1110,6 +1164,7 @@ function App() {
             toast.success(t('toast.commandDeleted'));
         } catch (err) {
             console.error('Failed to delete command:', err);
+            toast.error(t('toast.commandDeleteFailed'));
         }
     };
 
@@ -1328,6 +1383,7 @@ function App() {
             toast.success(t('toast.commandSaved'));
         } catch (err) {
             console.error('Failed to save script:', err);
+            toast.error(t('toast.scriptSaveFailed'));
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs via useSyncedRef are stable
     }, [loadData, t]);
@@ -1515,20 +1571,6 @@ function App() {
     });
     /* eslint-enable react-hooks/refs */
 
-    // Memoize per-tab variable definitions so inactive tabs get stable references
-    // (prevents React.memo bypass from new array on every App render).
-    const tabVariablesMap = useMemo(() => {
-        const map: Record<string, VarPromptType[]> = {};
-        for (const tab of openTabs) {
-            if (tab.id === '__welcome__') continue;
-            const draft = tabDrafts[tab.id];
-            if (draft && !isNewCommandTabId(tab.id)) {
-                map[tab.id] = variableDefinitionsToPrompts(draft.variables);
-            }
-        }
-        return map;
-    }, [tabDrafts, openTabs]);
-
     // Only the executing tab should receive isExecuting=true (prevents React.memo
     // bypass on all mounted CommandDetail instances when execution state changes).
     // Driven by state so the executing tab remains pinned even if user switches tabs.
@@ -1604,17 +1646,24 @@ function App() {
                                             const draft = tabDrafts[tab.id];
                                             const baseline = tabBaselines[tab.id];
                                             const isTabNew = isNewCommandTabId(tab.id);
+                                            // The placeholder Command for new tabs is built inside
+                                            // CommandDetailTab (via useMemo, keyed on tabId + categoryId)
+                                            // rather than here, so its reference stays stable across
+                                            // unrelated App renders without needing a ref-backed cache.
                                             const command = isTabNew
-                                                ? makePlaceholderCommand(tab.id, draft?.categoryId)
+                                                ? null
                                                 : commands.find((c) => c.id === tab.id) ?? null;
                                             const isTabDirty = !!(draft && baseline && !draftsEqual(draft, baseline));
                                             const isTabActive = tab.id === activeTabId;
 
-                                            const tabVariables = isTabActive
-                                                ? resolvedVariables
-                                                : (tabVariablesMap[tab.id] ?? []);
+                                            // Only the active tab's variables come from resolvedVariables
+                                            // (server-resolved CEL defaults). Inactive tabs derive their own
+                                            // stable prompts from draft.variables inside CommandDetailTab, so
+                                            // EMPTY_VARIABLES here is just a stable placeholder they ignore.
+                                            const tabVariables = isTabActive ? resolvedVariables : EMPTY_VARIABLES;
 
-                                            if (!command || !draft) return null;
+                                            if (!isTabNew && !command) return null;
+                                            if (!draft) return null;
 
                                             return (
                                                 <CommandDetailTab
@@ -1630,7 +1679,7 @@ function App() {
                                                     variables={tabVariables}
                                                     currentOS={currentOS}
                                                     defaultWorkingDir={defaultWorkingDir}
-                                                    onDraftChange={(partial) => updateDraft(tab.id, partial)}
+                                                    onDraftChange={updateDraft}
                                                     onExecute={handleExecute}
                                                     onFillVariables={handleFillVariablesByTab}
                                                     onRenamePreset={handleRenamePresetForTab}
@@ -1640,8 +1689,8 @@ function App() {
                                                     onReorderPresets={handleReorderPresetsForTab}
                                                     onSaveScript={handleSaveScript}
                                                     onResolvedValuesChange={isTabActive ? setCurrentResolvedValues : undefined}
-                                                    onSave={() => void handleSaveTab(tab.id)}
-                                                    onDiscard={() => handleDiscardTab(tab.id)}
+                                                    onSave={handleSaveTab}
+                                                    onDiscard={handleDiscardTab}
                                                 />
                                             );
                                         })}
@@ -1797,16 +1846,16 @@ function App() {
                         }
                     }}
                 >
-                    <AlertDialogContent data-testid="confirm-dialog">
+                    <AlertDialogContent data-testid="confirm-discard-tab-dialog">
                         <AlertDialogHeader>
                             <AlertDialogTitle>{t('app.discardTitle')}</AlertDialogTitle>
                             <AlertDialogDescription>{t('app.discardDescription')}</AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                            <AlertDialogCancel data-testid="confirm-dialog-cancel">{t('app.cancel')}</AlertDialogCancel>
+                            <AlertDialogCancel data-testid="confirm-discard-tab-cancel">{t('app.cancel')}</AlertDialogCancel>
                         <AlertDialogAction
                             variant="destructive"
-                            data-testid="confirm-dialog-confirm"
+                            data-testid="confirm-discard-tab-confirm"
                             onClick={() => {
                                     setModal({ type: 'none' });
                                     const tabId = pendingCloseTabIdRef.current;
@@ -1823,7 +1872,7 @@ function App() {
                     open={modal.type === 'confirmVarRemoval'}
                     onOpenChange={(open) => { if (!open) setModal({ type: 'none' }); }}
                 >
-                    <AlertDialogContent>
+                    <AlertDialogContent data-testid="confirm-var-removal-dialog">
                         <AlertDialogHeader>
                             <AlertDialogTitle>{t('commandDetail.varRemovalTitle')}</AlertDialogTitle>
                             <AlertDialogDescription className="space-y-2">
@@ -1841,11 +1890,12 @@ function App() {
                             </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                            <AlertDialogCancel onClick={() => setModal({ type: 'none' })}>
+                            <AlertDialogCancel data-testid="confirm-var-removal-cancel" onClick={() => setModal({ type: 'none' })}>
                                 {t('commandDetail.cancel')}
                             </AlertDialogCancel>
                             <AlertDialogAction
                                 variant="destructive"
+                                data-testid="confirm-var-removal-confirm"
                                 onClick={async () => {
                                     if (modal.type !== 'confirmVarRemoval') return;
                                     setModal({ type: 'none' });

@@ -89,11 +89,11 @@ task dev
 4. Ensure the project builds, lints, type-checks, and passes tests:
    - `make check` — `go build ./...` + `pnpm tsc --noEmit`
    - `make lint` — `golangci-lint run` + ESLint (**both block CI on any finding**)
-   - `make test` — `go test ./...` + the Playwright e2e suite
+   - `make test` — `go test ./...` + the frontend Vitest unit suite + the Playwright e2e suite
 5. Update documentation if your changes affect user-facing behavior.
 6. Open a pull request against the `main` branch with a clear description.
 
-For every pull request, CI runs type checks plus Go and frontend lint on Ubuntu, the Go test suite with `-race` on both Ubuntu and Windows, the Playwright e2e suite on Ubuntu, and build verification across Ubuntu, macOS, and Windows.
+For every pull request, CI automatically runs type checks plus Go and frontend lint on Ubuntu, and the frontend Vitest + Playwright e2e suites on Ubuntu. The Go test suite with `-race` (Ubuntu and Windows) and build verification (Ubuntu, macOS, Windows) are wired into the same workflow but gated to manual `workflow_dispatch` runs, not triggered on every PR.
 
 ## Coding Standards
 

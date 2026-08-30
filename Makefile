@@ -29,6 +29,7 @@ lint-fix:
 test:
 	mkdir -p frontend/dist
 	go test ./...
+	cd frontend && pnpm test
 	cd frontend && pnpm test:e2e
 
 clean:

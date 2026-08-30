@@ -379,6 +379,13 @@ export class EventNames {
              */
             this["settingsWindowClosing"] = "";
         }
+        if (!("dataReset" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["dataReset"] = "";
+        }
 
         Object.assign(this, $$source);
     }

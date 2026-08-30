@@ -39,6 +39,23 @@ function osPathMapEqual(a: Record<string, string>, b: Record<string, string>): b
   return aKeys.every(k => a[k] === b[k]);
 }
 
+/** Shallow equality for flat objects with primitive (string/boolean) values. */
+function shallowEqual<T extends object>(a: T, b: T): boolean {
+  const aKeys = Object.keys(a) as (keyof T)[];
+  const bKeys = Object.keys(b) as (keyof T)[];
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((k) => a[k] === b[k]);
+}
+
+/** Array equality using a per-item equality function, order-sensitive. */
+function arraysEqual<T>(a: T[], b: T[], itemEqual: (x: T, y: T) => boolean): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!itemEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
 export function draftsEqual(a: TabDraft, b: TabDraft): boolean {
   if (
     a.title !== b.title ||
@@ -48,12 +65,15 @@ export function draftsEqual(a: TabDraft, b: TabDraft): boolean {
   ) {
     return false;
   }
-  if (JSON.stringify(a.tags) !== JSON.stringify(b.tags)) return false;
-  if (JSON.stringify(a.revealed) !== JSON.stringify(b.revealed)) return false;
+  if (!arraysEqual(a.tags, b.tags, (x, y) => x === y)) return false;
+  if (!shallowEqual(a.revealed, b.revealed)) return false;
   if (!osPathMapEqual(a.workingDir, b.workingDir)) return false;
   if (
-    JSON.stringify(normalizeVariablesForCompare(a.variables)) !==
-    JSON.stringify(normalizeVariablesForCompare(b.variables))
+    !arraysEqual(
+      normalizeVariablesForCompare(a.variables),
+      normalizeVariablesForCompare(b.variables),
+      shallowEqual,
+    )
   ) {
     return false;
   }

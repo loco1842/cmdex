@@ -370,12 +370,15 @@ Use lowercase kebab-case for the description: `feat/add-command-preset-support`.
 
 ### CI Checks
 
-Every pull request triggers the [CI workflow](.github/workflows/ci.yml) which runs:
+Every pull request triggers the [CI workflow](.github/workflows/ci.yml), but only two of its jobs actually run automatically:
 
-| Job | What it checks | Platform |
-|-----|---------------|----------|
-| **Type check** | Go compilation, ESLint, TypeScript `tsc --noEmit`, Wails bindings generation | Ubuntu |
-| **Build check** | `task build` cross-platform build verification | Ubuntu, macOS, Windows |
+| Job | What it checks | Platform | Trigger |
+|-----|---------------|----------|---------|
+| **Type check** | Go compilation, ESLint, TypeScript `tsc --noEmit`, Wails bindings generation | Ubuntu | every push/PR |
+| **e2e** | Frontend Vitest unit tests + Playwright e2e suite (Chromium) | Ubuntu | every push/PR |
+| **go-test** | `go test -race ./...` | Ubuntu | manual (`workflow_dispatch`) |
+| **test-windows** | `go test -race ./...`, including the real ConPTY backend | Windows | manual (`workflow_dispatch`) |
+| **Build check** | `task build` cross-platform build verification | Ubuntu, macOS, Windows | manual (`workflow_dispatch`) |
 
-All checks must pass before a PR can be merged. The CI caches Go modules, pnpm dependencies, Wails CLI, and platform-specific build tools (GTK, NSIS) to keep run times fast.
+The two automatic checks must pass before a PR can be merged; the manual jobs are triggered explicitly (e.g. before a release) rather than gating every PR. The CI caches Go modules, pnpm dependencies, Wails CLI, and platform-specific build tools (GTK, NSIS) to keep run times fast.
 

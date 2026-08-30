@@ -395,6 +395,7 @@ const TerminalComponent = forwardRef<TerminalHandle, TerminalComponentProps>(
     <div
       ref={containerRef}
       className="terminal-container"
+      data-testid={`terminal-container-${sessionId}`}
       style={{ display: isVisible ? '' : 'none' }}
     />
   );

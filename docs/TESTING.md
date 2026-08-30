@@ -4,13 +4,14 @@ This document covers the current testing status, manual testing workflows, and a
 
 ## 1. Current Testing Status
 
-**Cmdex has automated tests, but coverage is uneven across the stack.**
+**Cmdex has automated tests across the stack.**
 
 - **Go backend:** `*_test.go` files exist across the root package (migrations, terminal sessions, PTY backends, execution, output capture/ANSI, shell integration — see [Section 7](#7-running-tests) for the full list).
-- **Frontend:** No `.test.ts`/`.test.tsx` unit tests exist yet in `frontend/src/`, but Playwright e2e specs exist under `frontend/e2e/tests/*.spec.ts`, run via the `test:e2e` script in `frontend/package.json`.
-- **CI:** `.github/workflows/ci.yml`'s `typecheck` job (build check, lint, type check) runs on every push/PR. The `test`, `test-windows`, and `build-check` jobs run the Go and Playwright suites but are gated to `workflow_dispatch` — they do **not** run automatically on push/PR.
+- **Frontend unit tests:** Vitest specs under `frontend/src/**/*.test.ts`, covering pure logic in `src/utils` (`tabDraft`, `templateVars`, `tab`, `path`) and `src/lib` (`shortcuts`). Run via the `test` script in `frontend/package.json`.
+- **Frontend e2e tests:** Playwright specs under `frontend/e2e/tests/*.spec.ts` — tabs, presets, variables/execution, the command palette and keyboard shortcuts, sidebar, settings, error-toast coverage, an i18n raw-key guard, terminal, commands, categories, themes, a smoke test, and a mock/bindings drift guard (`mock-contract.spec.ts`). Run via the `test:e2e` script.
+- **CI:** `.github/workflows/ci.yml`'s `typecheck` job (build check, lint, type check) and `e2e` job (Vitest + Playwright) both run on every push/PR. The `go-test`, `test-windows`, and `build-check` jobs run the Go `-race` suites and cross-platform build verification but are gated to `workflow_dispatch` — they do **not** run automatically on push/PR.
 
-So automated push/PR verification is build + lint + type check only; the Go and Playwright suites must be triggered manually via `workflow_dispatch`, or run locally with `make test` / `go test ./...` / `cd frontend && pnpm test:e2e`.
+So automated push/PR verification covers build + lint + type check + frontend unit/e2e tests; only the Go `-race` suites and cross-platform build verification must be triggered manually via `workflow_dispatch`, or run locally with `make test` / `go test ./...` / `cd frontend && pnpm test` / `cd frontend && pnpm test:e2e`.
 
 ## 2. Manual Testing Guide
 
@@ -55,9 +56,9 @@ cd frontend && pnpm tsc --noEmit
 3. Exercise the features in the checklist below.
 4. Test on your target platform (macOS, Linux, or Windows), as terminal integration and shell execution vary by OS.
 
-## 3. Planned Testing Strategy
+## 3. Testing Strategy
 
-The project is structured to support three layers of automated testing:
+The project has three layers of automated testing, all implemented:
 
 ### Go Unit & Integration Tests
 
@@ -98,41 +99,37 @@ go test ./...
 
 ### Frontend Unit Tests
 
-The frontend uses **React 19**, **Vite**, and **TypeScript**. The recommended test stack is **Vitest** (aligns with Vite) plus **React Testing Library**.
+The frontend uses **React 19**, **Vite**, and **TypeScript**. Unit tests use **Vitest** (`frontend/vitest.config.ts`, `environment: 'node'` — no jsdom/React Testing Library, since every covered function is pure and touches no DOM; UI behavior is covered by the Playwright e2e suite instead).
 
-**Priority targets:**
+**Covered today** (`frontend/src/**/*.test.ts`, colocated with the code they test):
 
-| Module | File | Why test |
-|--------|------|----------|
-| Template variables | `frontend/src/utils/templateVars.ts` | Pure functions (`extractTemplateVarNames`, `mergeDetectedVariables`, `buildVariablesFromScript`). |
-| Tab draft utilities | `frontend/src/utils/tabDraft.ts` | `draftsEqual`, `cloneDraft`, `draftFromCommand` contain core state logic. |
-| Type utilities | `frontend/src/types.ts` | `getCommandDisplayTitle` and other data transforms. |
+| Module | File | What's covered |
+|--------|------|-----------------|
+| Tab draft utilities | `frontend/src/utils/tabDraft.ts` | `draftsEqual` (every field, incl. tag order-sensitivity and the `revealed` flags), `cloneDraft`, `draftFromCommand`, `makePlaceholderCommand`. |
+| Template variables | `frontend/src/utils/templateVars.ts` | `extractTemplateVarNames` (word-chars-only regex), the `mergeDetectedVariables` (keeps orphans) vs. `buildVariablesFromScript` (drops orphans) asymmetry, `normalizeVariablesForCompare`, `variableDefinitionsToPrompts`. |
+| Tab id / display title | `frontend/src/utils/tab.ts` | `isNewCommandTabId`/`createNewTabId`, `getCommandDisplayTitle`'s fallback chain (title → shebang-stripped script → 50-char truncation). |
+| OS path map helpers | `frontend/src/utils/path.ts` | `normalizeOS`, `getOSPath`, `setOSPath` (deletes the key on an empty path rather than storing `""`), `shortenPath`. |
+| Keyboard shortcut labels | `frontend/src/lib/shortcuts.ts` | `shortcutLabelParts`/`shortcutLabelString`/`isCmdOrCtrl` on both Mac and non-Mac user agents (module-scoped `isMac` requires `vi.resetModules()` + a stubbed `navigator` per case). |
 
-**Suggested devDependencies to add:**
+Run with:
 
 ```bash
-cd frontend
-pnpm add -D vitest @testing-library/react @testing-library/jest-dom jsdom
-```
-
-Then add a `test` script to `frontend/package.json`:
-
-```json
-"scripts": {
-  "test": "vitest run",
-  "test:watch": "vitest"
-}
+cd frontend && pnpm test         # run once
+cd frontend && pnpm test:watch   # watch mode
 ```
 
 ### E2E / Integration Tests
 
-End-to-end testing for a Wails v3 desktop app is more involved because the runtime requires a native webview.
+End-to-end testing for a Wails v3 desktop app would normally be complicated by the runtime requiring a native webview — Cmdex sidesteps that by running the real React app under plain Vite/Chromium with `@wailsio/runtime` aliased to an in-memory mock (`frontend/e2e/mocks/runtime.ts`), rather than the native Wails webview. That mock:
 
-**Recommended approach (incremental):**
+- Dispatches by the generated bindings' numeric `$Call.ByID` method hash, named once in a `METHOD_IDS` table (`mock-contract.spec.ts` asserts this stays in sync with `frontend/bindings/cmdex/*.js`).
+- Supports one-shot/sticky RPC fault injection (`window.__cmdexE2E.failNext(method, message)` / `setFailure(method, message)`) for methods the real backend can actually fail on — refused for the handful that are log-and-return-empty in production (`GetCategories`, `GetCommands`, `GetCommandsByCategory`, `SearchCommands`, `GetPresets`, `GetVariables`, `GetSettings`) or that never reject at all (`RunCommand`).
+- Exposes a call log (`window.__cmdexE2E.callLog`) for asserting exactly which RPCs fired.
+- Wraps every `Events.Emit` in the same `WailsEvent` envelope (`{ name, data, sender }`) the real runtime does, and provides `emitPtyOutput`/`emitPtyExit`/`emitPtyCleared` helpers to simulate backend-driven terminal events.
 
-1. **Backend integration tests:** Test the full Go stack (DB -> Services) without the UI by calling service methods directly in `*_test.go` files.
-2. **Frontend component tests:** Mount key components (e.g., `CommandDetail`, `VariablePrompt`) with mocked Wails bindings.
-3. **E2E (future):** Evaluate <!-- VERIFY: Wails v3 E2E tooling or Playwright with a server-mode build --> if native E2E becomes necessary.
+`e2e/fixtures.ts` provides shared Playwright fixtures (`seed`, `gotoApp`, `gotoSettings`, `toast`, `visibleTabShell`, `pressCmdOrCtrl`) that every spec builds on instead of hand-rolling navigation and toast assertions per file.
+
+Backend integration tests still live separately in `*_test.go` files (calling service methods directly, no UI); there are no frontend component tests (e.g. React Testing Library mounting `CommandDetail` in isolation) — UI behavior is covered end-to-end via Playwright instead.
 
 ## 4. Testing Checklist for Common Features
 
@@ -210,16 +207,10 @@ go test -run TestExtractTemplateVars ./...
 
 ### Adding a Frontend Unit Test
 
-1. Install Vitest and Testing Library if not already present:
-
-```bash
-cd frontend
-pnpm add -D vitest @testing-library/react @testing-library/jest-dom jsdom
-```
-
-2. Create `frontend/src/utils/templateVars.test.ts`:
+Vitest is already configured (`frontend/vitest.config.ts`, `test` script in `frontend/package.json`) — just add a colocated `*.test.ts` file next to the module it covers:
 
 ```typescript
+// frontend/src/utils/templateVars.test.ts
 import { describe, it, expect } from 'vitest';
 import { extractTemplateVarNames } from './templateVars';
 
@@ -230,31 +221,44 @@ describe('extractTemplateVarNames', () => {
 });
 ```
 
-3. Add a `test` script to `frontend/package.json`:
-
-```json
-"scripts": {
-  "test": "vitest run",
-  "test:watch": "vitest"
-}
-```
-
-4. Run the tests:
+Run it:
 
 ```bash
 cd frontend && pnpm test
 ```
 
-### Updating CI to Run Tests
+### Adding a Playwright e2e Test
 
-Go tests and Playwright e2e already run via the `test` job. Once Vitest is configured for frontend unit tests, add a step to that same job:
+Add a `*.spec.ts` file under `frontend/e2e/tests/`, importing `test`/`expect` from `../fixtures` (not `@playwright/test` directly) so seeding, navigation, and toast assertions share the existing fixtures:
 
-```yaml
-- name: Frontend unit tests
-  run: cd frontend && pnpm test
+```typescript
+import { test, expect } from '../fixtures';
+import { sel } from '../utils/selectors';
+
+test('does the thing', async ({ page, seed, gotoApp }) => {
+  await seed({ commands: [/* ... */] });
+  await gotoApp();
+  // ...
+});
 ```
 
-Platform coverage is already partly addressed: a dedicated `test-windows` job runs `go test -race ./...` on `windows-latest`, which is where the PTY layer diverges most (ConPTY, wrap artifacts, quoting). macOS is still only covered by `build-check`, so macOS-specific terminal behavior is not exercised by CI.
+To exercise a failure path, inject a fault into the mock rather than hand-writing a new handler:
+
+```typescript
+await page.evaluate(() => window.__cmdexE2E!.failNext('UpdateCommand', 'disk full'));
+```
+
+`failNext`/`setFailure` refuse (with a console warning) for methods the real backend can never fail on (log-and-return-empty reads, and `RunCommand`) — see `e2e/mocks/runtime.ts`'s `NEVER_REJECTS`.
+
+Run it:
+
+```bash
+cd frontend && pnpm test:e2e
+```
+
+### CI Wiring
+
+Both `pnpm test` and `pnpm test:e2e` already run in CI's `e2e` job, which triggers on every push/PR (unlike `go-test`/`test-windows`/`build-check`, which are `workflow_dispatch`-gated). Platform coverage is already partly addressed there too: a dedicated `test-windows` job runs `go test -race ./...` on `windows-latest`, which is where the PTY layer diverges most (ConPTY, wrap artifacts, quoting). macOS is still only covered by `build-check`, so macOS-specific terminal behavior is not exercised by CI.
 
 ## 6. Test Framework and Setup
 
@@ -274,17 +278,15 @@ The test helper `newTestDB(t)` in `db_test.go` creates a fresh in-memory SQLite 
 
 ### Frontend
 
-No JavaScript/TypeScript test framework is currently installed. The `frontend/package.json` `devDependencies` include ESLint and TypeScript for static analysis, but no test runner (`vitest`, `jest`, etc.) or component testing library (`@testing-library/react`, etc.).
+**Unit tests:** Vitest (`frontend/vitest.config.ts`), configured with `environment: 'node'` — no jsdom/`@testing-library/react`, since the covered modules (`src/utils`, `src/lib`) are pure functions with no DOM dependency. Specs are colocated `*.test.ts` files (`include: ['src/**/*.test.ts']`). Run with `cd frontend && pnpm test` (`pnpm test:watch` for watch mode).
 
-**Missing test infrastructure:**
-- No `vitest.config.ts` or `jest.config.ts`
-- No `jsdom` or `happy-dom` environment configured
-- No `test` script in `frontend/package.json` `scripts`
+**E2E tests:** Playwright (`frontend/e2e/playwright.config.ts`), Chromium only, against a real Vite dev server (`e2e/vite.config.ts`) with `@wailsio/runtime` aliased to `e2e/mocks/runtime.ts`. A pinned 1440×900 viewport avoids `ResizablePanel`'s sidebar auto-collapse (`innerWidth <= 600`) and the terminal panel's viewport-derived default height from interfering with unrelated specs. `frontend/e2e/tsconfig.json` (run via `pnpm typecheck:e2e`) type-checks the specs and mock, which the main `tsconfig.json` (`pnpm tsc --noEmit`) does not cover.
 
-The frontend statically checks code quality via:
+The frontend also statically checks code quality via:
 ```bash
-cd frontend && pnpm lint        # ESLint
-cd frontend && pnpm tsc --noEmit # TypeScript type check
+cd frontend && pnpm lint            # ESLint
+cd frontend && pnpm tsc --noEmit    # TypeScript type check (src/, wailsjs/)
+cd frontend && pnpm typecheck:e2e   # TypeScript type check (e2e/)
 ```
 
 ## 7. Running Tests
@@ -314,15 +316,14 @@ All tests live in the root package (`db_test.go`, `execution_service_test.go`, `
 
 Some tests are build-tagged or skipped by platform: the stress and max-sessions variants are `//go:build darwin` and use the mock PTY backend, while `TestTerminalShutdown`/`TestTerminalExit` are Windows-skipped because they call the raw `ptyStart` helper with Unix shell syntax. `TestBuildCommandLine` (`execution_service_test.go`) is platform-independent and covers POSIX/cmd.exe/PowerShell command-line construction on every OS; `shell_integration_test.go`'s `TestPwshIntegration_*` suite includes Windows-only ConPTY execution tests (`BuiltCommandLineActuallyExecutes`, `LFAloneDoesNotSubmitCommandLine`, `WorkingDirPrefixChangesDirectory`, `WorkingDirPrefixShortCircuitsOnBadDir`) gated on `pwshRealPTYSkipReason` rather than a build tag.
 
-`make test` runs `go test ./...` followed by the frontend Playwright e2e suite (`cd frontend && pnpm test:e2e`); there is no `task test` target in `Taskfile.yml`.
+`make test` runs `go test ./...`, then the frontend Vitest unit suite (`cd frontend && pnpm test`), then the Playwright e2e suite (`cd frontend && pnpm test:e2e`); there is no `task test` target in `Taskfile.yml`.
 
 ### Frontend Tests
 
-Playwright is installed and runs the e2e suite (`cd frontend && pnpm test:e2e`, config at `frontend/e2e/playwright.config.ts`). There is no **unit** test runner yet. Once Vitest is set up (see [Section 3](#3-planned-testing-strategy)), the expected commands would be:
-
 ```bash
-cd frontend && pnpm test         # Run once
-cd frontend && pnpm test:watch   # Watch mode
+cd frontend && pnpm test         # Vitest unit tests, run once
+cd frontend && pnpm test:watch   # Vitest, watch mode
+cd frontend && pnpm test:e2e     # Playwright e2e suite (config: frontend/e2e/playwright.config.ts)
 ```
 
 ### Static Analysis (Pre-Commit)
@@ -393,16 +394,17 @@ test: {
 
 ### Current CI Pipeline
 
-Test execution **is part of the CI configuration, but not of every automated run**. `.github/workflows/ci.yml` consists of four jobs; only `typecheck` runs automatically on push/PR — `test`, `test-windows`, and `build-check` are gated to `workflow_dispatch` (manual trigger) and must be run explicitly:
+`.github/workflows/ci.yml` consists of five jobs. `typecheck` and `e2e` run automatically on every push/PR; `go-test`, `test-windows`, and `build-check` are gated to `workflow_dispatch` (manual trigger) and must be run explicitly:
 
 | Job | Runner | Trigger | What It Does |
 |-----|--------|---------|--------------|
 | `typecheck` | ubuntu-24.04 | push, PR, workflow_dispatch | Lint frontend, `go build ./...`, `golangci-lint`, generate Wails bindings, `tsc --noEmit` |
-| `test` | ubuntu-24.04 | workflow_dispatch only | `go test -race ./...` and the frontend Playwright e2e suite (`pnpm test:e2e`); blocks the run on failure |
+| `e2e` | ubuntu-24.04 | push, PR, workflow_dispatch | Generate Wails bindings, frontend Vitest unit suite (`pnpm test`), e2e specs' own type check (`pnpm typecheck:e2e`), Playwright e2e suite (`pnpm test:e2e`); uploads the HTML report on failure |
+| `go-test` | ubuntu-24.04 | workflow_dispatch only | `go test -race ./...`; blocks the run on failure |
 | `test-windows` | windows-latest | workflow_dispatch only | `go test -race ./...`, including the real ConPTY backend tests; blocks the run on failure |
 | `build-check` | matrix: ubuntu-24.04, macos-latest, windows-latest | workflow_dispatch only | Cross-platform build via `task build` |
 
-> Note that CI runs `go test -race`, while `make test` runs plain `go test`. A data race in the terminal session code can therefore pass locally and fail in CI — run `go test -race ./...` yourself when touching `terminal_service.go` or `terminal_capture.go`.
+> Note that CI runs `go test -race` (in `go-test`/`test-windows`), while `make test` runs plain `go test`. A data race in the terminal session code can therefore pass locally and fail in CI — run `go test -race ./...` yourself when touching `terminal_service.go` or `terminal_capture.go`. `go-test` is `workflow_dispatch`-gated, so this only surfaces when someone triggers it manually (e.g. before a release) — it does not block PRs.
 
 **Key CI details:**
 - Wails CLI version: `v3.0.0-beta.12` (pinned via `WAILS_VERSION` env var in CI)
@@ -412,8 +414,8 @@ Test execution **is part of the CI configuration, but not of every automated run
 - `golangci-lint` and `pnpm lint` block the `typecheck` job on any finding
 - CI never invokes the Makefile — `make check`/`fmt`/`lint`/`test` are local conveniences that mirror the CI steps
 
-**e2e gotcha:** `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by hardcoding each generated binding's numeric `$Call.ByID` method hash. If you regenerate bindings and those IDs shift, the mock silently stops matching — tests fail with `[e2e mock] no handler for method ID …` console warnings rather than an obvious error. Update the handler table whenever you change a bound method signature.
+**e2e gotcha (mostly closed):** `frontend/e2e/mocks/runtime.ts` mocks `@wailsio/runtime` by dispatching on each generated binding's numeric `$Call.ByID` method hash (named once in its `METHOD_IDS` table, not scattered as bare numeric literals). Regenerating bindings can still shift those hashes, but `mock-contract.spec.ts` now parses `frontend/bindings/cmdex/*.js` and asserts the mock's table matches exactly — a mismatch fails that spec loudly instead of the old silent `[e2e mock] no handler for method ID …` console warning. Update `METHOD_IDS` (and add a handler under the matching name in `handlersByName`) whenever you change a bound method signature.
 
 ### Adding Tests to CI
 
-Go tests and the Playwright e2e suite already run in the `test` job, but only on manual `workflow_dispatch` — not on every push/PR. What's still missing is frontend **unit** tests (Vitest is not yet configured — see [Section 5 — Updating CI to Run Tests](#5-how-to-add-tests)): once added, wire `cd frontend && pnpm test` into the `test` job alongside the existing steps.
+Vitest and the Playwright e2e suite both already run in the `e2e` job on every push/PR. To add a Go check to a PR-blocking job (rather than the `workflow_dispatch`-gated `go-test`), add a step to the `typecheck` or `e2e` job directly — be mindful that doing so slows down every push/PR, which is exactly why `go test -race ./...` (slower, and the PTY suite occasionally needs real timing) was kept manual-only instead.
