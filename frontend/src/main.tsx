@@ -140,11 +140,16 @@ if (isSettingsWindow) {
 
         const handleResetAllData = useCallback(async () => {
             await ResetAllData()
-            // db.ResetAll truncates app_settings too, so the main window is
-            // holding stale commands/categories *and* stale settings — tell it
-            // to reload both rather than requiring a restart.
+            // db.ResetAll truncates app_settings too, so this window's own
+            // customThemes is now stale — leaving it as-is would resurrect the
+            // deleted themes the moment any later persistSettings() call goes
+            // out, since every call round-trips customThemesStrRef.current.
+            syncCustomThemes([])
+            // The main window is holding stale commands/categories *and*
+            // stale settings — tell it to reload both rather than requiring a
+            // restart.
             Events.Emit(eventNames.dataReset)
-        }, [])
+        }, [syncCustomThemes])
 
         return (
             <SettingsPage

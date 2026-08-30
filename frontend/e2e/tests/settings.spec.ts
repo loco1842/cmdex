@@ -7,6 +7,12 @@ const VALID_THEME = {
   colors: { background: '#111111', foreground: '#eeeeee', primary: '#ff8800' },
 };
 
+const SECOND_THEME = {
+  name: 'Second Custom Theme',
+  type: 'dark',
+  colors: { background: '#222222', foreground: '#dddddd', primary: '#00ff88' },
+};
+
 function fileFrom(obj: unknown) {
   return { name: 'theme.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(obj)) };
 }
@@ -17,6 +23,10 @@ async function goToTypographyTab(page: Page) {
 
 async function goToGeneralTab(page: Page) {
   await page.getByRole('tab', { name: 'General' }).click();
+}
+
+async function goToAppearanceTab(page: Page) {
+  await page.getByRole('tab', { name: 'Appearance' }).click();
 }
 
 test.describe('Settings — Appearance', () => {
@@ -156,6 +166,38 @@ test.describe('Settings — General', () => {
       .poll(() => page.evaluate(() => window.__cmdexE2E!.callLog.some((c) => c.method === 'ResetAllData')))
       .toBe(true);
     expect(await page.evaluate(() => window.__cmdexE2E!.callLog.filter((c) => c.method === 'ResetAllData').length)).toBe(1);
+  });
+
+  test('Danger Zone: reset clears this window\'s own custom-theme state, so a later import cannot resurrect the deleted theme', async ({ page, gotoSettings }) => {
+    await gotoSettings();
+    // Import a custom theme so this window's customThemes state/ref is non-empty.
+    await page.locator('input[type="file"]').setInputFiles(fileFrom(VALID_THEME));
+    await expect(page.getByRole('button', { name: 'My Custom Theme theme, dark' })).toHaveAttribute('aria-pressed', 'true');
+
+    await goToGeneralTab(page);
+    await page.locator(sel.dangerZoneResetButton).click();
+    await page.locator(sel.dangerZoneConfirm).click();
+    await expect
+      .poll(() => page.evaluate(() => window.__cmdexE2E!.callLog.some((c) => c.method === 'ResetAllData')))
+      .toBe(true);
+
+    // Importing a second theme is the realistic post-reset action that
+    // round-trips this window's customThemes ref (onImportTheme ->
+    // syncCustomThemes([...stale, new]) -> persistSettings). If the ref was
+    // never cleared by the reset, the deleted theme comes back alongside
+    // the new one.
+    await goToAppearanceTab(page);
+    await page.locator('input[type="file"]').setInputFiles(fileFrom(SECOND_THEME));
+    await expect(page.getByRole('button', { name: 'Second Custom Theme theme, dark' })).toHaveAttribute('aria-pressed', 'true');
+
+    await expect(page.getByRole('button', { name: 'My Custom Theme theme, dark' })).toHaveCount(0);
+
+    const lastPayload = await page.evaluate(() => {
+      const calls = window.__cmdexE2E!.callLog.filter((c) => c.method === 'SetSettings');
+      return JSON.parse(calls[calls.length - 1].args[0] as string);
+    });
+    const persistedNames = JSON.parse(lastPayload.customThemes).map((t: { name: string }) => t.name);
+    expect(persistedNames).toEqual(['Second Custom Theme']);
   });
 
   test('Danger Zone: Cancel backs out without calling ResetAllData', async ({ page, gotoSettings }) => {
