@@ -200,6 +200,49 @@ test.describe('Settings — General', () => {
     expect(persistedNames).toEqual(['Second Custom Theme']);
   });
 
+  test('Danger Zone: reset also clears the local theme id, so a same-session theme import cannot persist the deleted theme id', async ({ page, gotoSettings }) => {
+    await gotoSettings();
+    await page.locator('input[type="file"]').setInputFiles(fileFrom(VALID_THEME));
+    await expect(page.getByRole('button', { name: 'My Custom Theme theme, dark' })).toHaveAttribute('aria-pressed', 'true');
+
+    const deletedThemeId = await page.evaluate(() => {
+      const calls = window.__cmdexE2E!.callLog.filter((c) => c.method === 'SetSettings');
+      const payloads = calls.map((c) => JSON.parse(c.args[0] as string) as { theme?: string });
+      return payloads.find((p) => p.theme?.startsWith('custom-'))?.theme;
+    });
+    expect(deletedThemeId).toMatch(/^custom-/);
+
+    await goToGeneralTab(page);
+    await page.locator(sel.dangerZoneResetButton).click();
+    await page.locator(sel.dangerZoneConfirm).click();
+    await expect
+      .poll(() => page.evaluate(() => window.__cmdexE2E!.callLog.some((c) => c.method === 'ResetAllData')))
+      .toBe(true);
+
+    // Importing a second theme without reopening settings is the exact
+    // scenario from the report: handleImportTheme and the onThemeChange
+    // call right after it fire two unordered persistSettings() writes. If
+    // the reset left `theme` pointing at the deleted custom theme id,
+    // whichever of those two writes carries that stale closure value would
+    // persist a theme id absent from customThemes, regardless of which one
+    // lands last.
+    const beforeCount = await page.evaluate(
+      () => window.__cmdexE2E!.callLog.filter((c) => c.method === 'SetSettings').length,
+    );
+    await goToAppearanceTab(page);
+    await page.locator('input[type="file"]').setInputFiles(fileFrom(SECOND_THEME));
+    await expect(page.getByRole('button', { name: 'Second Custom Theme theme, dark' })).toHaveAttribute('aria-pressed', 'true');
+    await expect
+      .poll(() => page.evaluate(() => window.__cmdexE2E!.callLog.filter((c) => c.method === 'SetSettings').length))
+      .toBeGreaterThan(beforeCount);
+
+    const postResetThemeIds = await page.evaluate((from) => {
+      const calls = window.__cmdexE2E!.callLog.filter((c) => c.method === 'SetSettings');
+      return calls.slice(from).map((c) => (JSON.parse(c.args[0] as string) as { theme: string }).theme);
+    }, beforeCount);
+    expect(postResetThemeIds).not.toContain(deletedThemeId);
+  });
+
   test('Danger Zone: Cancel backs out without calling ResetAllData', async ({ page, gotoSettings }) => {
     await gotoSettings();
     await goToGeneralTab(page);
