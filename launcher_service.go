@@ -119,7 +119,7 @@ func (m wailsLauncherHotkeyManager) IsRegistered(accelerator string) bool {
 }
 
 // Validate uses Wails' accelerator parser through MenuItem.SetAccelerator.
-// Wails beta.12 does not export the parser, so the temporary item provides the
+// Wails does not export the parser, so the temporary item provides the
 // same validation path without registering an OS shortcut.
 func (m wailsLauncherHotkeyManager) Validate(accelerator string) error {
 	item := application.NewMenuItem("launcher-shortcut-validation")

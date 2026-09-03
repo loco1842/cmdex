@@ -29,7 +29,7 @@ The workflow triggers on every push or pull request to `main`, but not every job
 
 - **Type Check Job** (`ubuntu-latest`) — runs on every push/PR
   - Installs Go (version from `go.mod`), Node.js 24, pnpm, and Linux build dependencies (`libgtk-4-dev`, `libwebkitgtk-6.0-dev`).
-  - Installs Wails v3 CLI (`v3.0.0-beta.12`).
+  - Installs Wails v3 CLI (`v3.0.0-beta.16`).
   - Generates Wails bindings and runs `pnpm tsc --noEmit`.
   - Runs `go build ./...` to verify compilation.
 
@@ -80,12 +80,12 @@ Steps:
 - **Go** `>= 1.26.0`
 - **Node.js** `24`
 - **pnpm**
-- **Wails v3 CLI** `v3.0.0-beta.12`
+- **Wails v3 CLI** `v3.0.0-beta.16`
 - **Task** (`taskfile.dev`) `3.x`
 
 Install the Wails CLI:
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.12
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 ```
 
 ### Install Dependencies
