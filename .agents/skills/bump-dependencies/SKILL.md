@@ -29,7 +29,15 @@ go mod tidy
 
 Keep the Wails Go module (`github.com/wailsapp/wails/v3`) and the frontend `@wailsio/runtime` on matching versions.
 
-## 4. Bump frontend packages
+## 4. Sweep for stale version strings
+
+The old version is pinned in more places than the manifest files. After bumping, search the whole repo for the previous version (e.g. `beta.12`) and update every pin:
+
+- CI/release workflows (`.github/workflows/*.yml` — `WAILS_VERSION`)
+- Docs (`CLAUDE.md`, `CONTRIBUTING.md`, `docs/*.md` — CLI install commands and version tables)
+- Code comments referencing the old version (reword version-agnostically if the statement is still true on the new version, e.g. "Wails does not export the parser" instead of "Wails beta.12 does not …")
+
+## 5. Bump frontend packages
 
 ```bash
 pnpm update --latest
@@ -40,7 +48,7 @@ Run in `frontend/`. Afterwards inspect `git diff frontend/package.json`:
 - **Confirm major bumps with the user before keeping them** (e.g. a TypeScript major bump can break `tsc` on previously valid code). Revert offenders with `pnpm add [-D] <pkg>@<previous-range>`.
 - Leave intentionally pinned packages untouched.
 
-## 5. Regenerate bindings
+## 6. Regenerate bindings
 
 ```bash
 wails3 generate bindings
@@ -48,7 +56,7 @@ wails3 generate bindings
 
 Never hand-edit `frontend/bindings/` — it is generated output. If the command produces no diff, there was no API change and there is nothing to commit for bindings.
 
-## 6. Verify
+## 7. Verify
 
 Use the repo's documented checks (see `AGENTS.md`):
 
@@ -58,7 +66,7 @@ Use the repo's documented checks (see `AGENTS.md`):
 
 If a check fails after the bump, isolate the cause: check out `main` in a temporary worktree (`git worktree add /tmp/<name> origin/main`), confirm the check passes there, then pin or revert the offending package on the bump branch. Remove the worktree when done (`git worktree remove --force <path>`).
 
-## 7. Commit, push, PR (only when explicitly requested)
+## 8. Commit, push, PR (only when explicitly requested)
 
 - Stage only the intended files (`go.mod`, `go.sum`, `frontend/package.json`, `frontend/pnpm-lock.yaml`, plus regenerated bindings if any).
 - Commit with a conventional message, e.g. `chore: bump wails v3 to beta.16 and update frontend dependencies`.
@@ -71,6 +79,7 @@ If a check fails after the bump, isolate the cause: check out `main` in a tempor
 - [ ] Go modules bumped, `go mod tidy` clean
 - [ ] Frontend packages bumped, `package.json` diff reviewed, majors confirmed
 - [ ] `@wailsio/runtime` matches the Wails Go module version
+- [ ] No stale old-version strings remain (workflows, docs, comments)
 - [ ] Bindings regenerated (or confirmed no-op)
 - [ ] `go build`, `go vet`, `go test` pass
 - [ ] `tsc --noEmit`, `lint`, `test` pass in `frontend/`
