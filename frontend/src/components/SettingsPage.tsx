@@ -10,6 +10,7 @@ import LauncherSettings from './LauncherSettings';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Upload, Download, X, FolderOpen } from 'lucide-react';
 import { SetSettings, GetSettings } from '../../bindings/cmdex/settingsservice';
+import { CheckForUpdates, GetAppVersion, UpdatesEnabled } from '../../bindings/cmdex/updateservice';
 import { PickDirectory, GetOS } from '../../bindings/cmdex/app';
 import { SaveThemeTemplate } from '../../bindings/cmdex/importexportservice';
 import { THEMES, type OSKey, type CustomTheme } from '../types';
@@ -171,6 +172,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   const [draftWorkingDir, setDraftWorkingDir] = useState('');
   const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
   const [shellIntegration, setShellIntegrationState] = useState(true);
+  const [autoUpdateCheck, setAutoUpdateCheckState] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [updatesEnabled, setUpdatesEnabled] = useState(false);
+  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
 
   // Refs track the latest values so the async GetSettings → merge → SetSettings
   // chain always reads the most recent state, avoiding stale-closure races when
@@ -181,6 +186,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   const draftMonoFontRef = useRef(draftMonoFont);
   const draftDensityRef = useRef(draftDensity);
   const shellIntegrationRef = useRef(shellIntegration);
+  const autoUpdateCheckRef = useRef(autoUpdateCheck);
 
   // Sync refs after every render so async callbacks always read the latest.
   useEffect(() => {
@@ -190,6 +196,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     draftMonoFontRef.current = draftMonoFont;
     draftDensityRef.current = draftDensity;
     shellIntegrationRef.current = shellIntegration;
+    autoUpdateCheckRef.current = autoUpdateCheck;
   });
 
   // Tracks whether the user has edited any draft field. While true, the
@@ -214,6 +221,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         density: draftDensityRef.current,
         defaultWorkingDir: current?.defaultWorkingDir || {},
         shellIntegration: shellIntegrationRef.current,
+        autoUpdateCheck: autoUpdateCheckRef.current,
         ...override,
       };
       SetSettings(JSON.stringify(merged)).catch(() => {});
@@ -258,6 +266,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     persistSettings({ shellIntegration: v });
   }, [markTouched, persistSettings]);
 
+  const changeAutoUpdateCheck = useCallback((v: boolean) => {
+    markTouched();
+    setAutoUpdateCheckState(v);
+    persistSettings({ autoUpdateCheck: v });
+  }, [markTouched, persistSettings]);
+
+  const handleCheckForUpdates = useCallback(async () => {
+    setCheckingForUpdates(true);
+    try {
+      await CheckForUpdates();
+    } catch (err) {
+      toast.error(t('settings.checkFailed', { message: String(err) }));
+    } finally {
+      setCheckingForUpdates(false);
+    }
+  }, [t]);
+
   const changeWorkingDir = useCallback((v: string) => {
     markTouched();
     setDraftWorkingDir(v);
@@ -276,8 +301,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   }, [persistWorkingDir, draftWorkingDir]);
 
   useEffect(() => {
-    Promise.all([GetSettings(), GetOS()])
-      .then(([s, os]) => {
+    Promise.all([GetSettings(), GetOS(), GetAppVersion().catch(() => 'dev'), UpdatesEnabled().catch(() => false)])
+      .then(([s, os, version, enabled]) => {
         if (!s) return;
         if (userTouchedRef.current) return;
         setCurrentOS(normalizeOS(os));
@@ -294,6 +319,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         setSavedDensity(s.density || 'comfortable');
         setDraftDensity(s.density || 'comfortable');
         setShellIntegrationState(s.shellIntegration ?? true);
+        setAutoUpdateCheckState(s.autoUpdateCheck ?? false);
+        setAppVersion(version);
+        setUpdatesEnabled(enabled);
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -638,6 +666,43 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
           <LauncherSettings />
 
+          <div className="border-t border-border pt-4 mt-2 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label>{t('settings.updates')}</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {updatesEnabled && appVersion
+                    ? t('settings.currentVersion', { version: appVersion })
+                    : t('settings.devVersion')}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!updatesEnabled || checkingForUpdates}
+                onClick={handleCheckForUpdates}
+              >
+                {checkingForUpdates ? t('settings.checkingForUpdates') : t('settings.checkForUpdates')}
+              </Button>
+            </div>
+            {updatesEnabled && (
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="auto-update-check-toggle">{t('settings.autoUpdateCheck')}</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t('settings.autoUpdateCheckHint')}
+                  </p>
+                </div>
+                <Switch
+                  id="auto-update-check-toggle"
+                  checked={autoUpdateCheck}
+                  onCheckedChange={changeAutoUpdateCheck}
+                />
+              </div>
+            )}
+          </div>
+
           {onResetAllData && (
             <div className="border-t border-border pt-4 mt-2">
               <Label className="text-destructive text-xs font-semibold uppercase tracking-wide">{t('settings.dangerZone')}</Label>
@@ -667,6 +732,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                           setDraftWorkingDir(wd);
                           setLocale(s.locale || 'en');
                           setShellIntegrationState(s.shellIntegration ?? true);
+                          setAutoUpdateCheckState(s.autoUpdateCheck ?? false);
                         }).catch(() => {});
                         userTouchedRef.current = false;
                         setConfirmReset(false);

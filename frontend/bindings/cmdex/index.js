@@ -10,6 +10,7 @@ import * as ImportExportService from "./importexportservice.js";
 import * as LauncherService from "./launcherservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as TerminalService from "./terminalservice.js";
+import * as UpdateService from "./updateservice.js";
 export {
     App,
     CommandService,
@@ -18,7 +19,8 @@ export {
     ImportExportService,
     LauncherService,
     SettingsService,
-    TerminalService
+    TerminalService,
+    UpdateService
 };
 
 export {

@@ -57,6 +57,11 @@ const METHOD_IDS = {
   PickDirectory: 1347829059,
   ShowSettingsWindow: 2596981913,
   ResetAllData: 121210722,
+  CheckForUpdates: 670986527,
+  GetAppVersion: 1469023009,
+  GetSkippedVersion: 1306757372,
+  GetUpdateState: 4160282334,
+  UpdatesEnabled: 2359163331,
 } as const;
 
 // LauncherService has a method named Resize too, but it is distinct from
@@ -116,6 +121,7 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   launcherEnabled: false,
   launcherShortcut: 'CmdOrCtrl+Shift+K',
   launchAtLogin: false,
+  autoUpdateCheck: false,
 };
 const settings: Record<string, any> = { ...DEFAULT_SETTINGS };
 
@@ -189,6 +195,10 @@ const callLog: Array<{ method: MethodName; args: any[] }> = [];
 // cancel semantic — a test opts into "the user picked a file" explicitly.
 let pendingImportResult: any[] | null = null;
 let pickDirectoryResult = '/mock/path';
+// The mock models a dev build by default (GetAppVersion 'dev',
+// UpdatesEnabled false — update_service.go's updaterDisabled). A test can
+// flip to a configured release build via __cmdexE2E.setUpdateInfo.
+let updateInfo = { version: 'dev', enabled: false };
 let lastOutputResult: { available: boolean; text: string; exitCode: number; truncated: boolean } = {
   available: false,
   text: '',
@@ -739,6 +749,21 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
 
   ShowSettingsWindow: () => {},
 
+  // ── Updater ──────────────────────────────────────────────
+  // Production CheckForUpdates returns immediately (the default updater
+  // window reflects progress itself) and only rejects for dev builds
+  // (update_service.go). The mock resolves, matching a configured build;
+  // a test can still failNext(CheckForUpdates) to exercise the error toast.
+  CheckForUpdates: () => {},
+
+  GetAppVersion: () => updateInfo.version,
+
+  GetSkippedVersion: () => '',
+
+  GetUpdateState: () => (updateInfo.enabled ? 'idle' : 'unconfigured'),
+
+  UpdatesEnabled: () => updateInfo.enabled,
+
   // ── Misc ─────────────────────────────────────────────────
   // db.ResetAll truncates app_settings too (db.go:1413-1422) — the frontend
   // relies on the data-reset event to reload settings, not just commands.
@@ -801,6 +826,7 @@ export class CancellablePromise<T> extends Promise<T> {
     callLog.length = 0;
     pendingImportResult = null;
     pickDirectoryResult = '/mock/path';
+    updateInfo = { version: 'dev', enabled: false };
     lastOutputResult = { available: false, text: '', exitCode: 0, truncated: false };
   },
   seed(data: {
@@ -809,6 +835,7 @@ export class CancellablePromise<T> extends Promise<T> {
     presets?: Record<string, any[]>;
     settings?: Record<string, any>;
     terminalSessions?: Array<{ id: string; name: string; running: boolean; shellPath: string; workingDir: string }>;
+    updateInfo?: { version: string; enabled: boolean };
   }) {
     if (data.categories) categories = data.categories;
     if (data.commands) commands = data.commands;
@@ -817,6 +844,9 @@ export class CancellablePromise<T> extends Promise<T> {
     // Settings are merged, not replaced, so a partial seed keeps the defaults
     // for every field it does not mention — same as the init-script path below.
     if (data.settings) Object.assign(settings, data.settings);
+    if (data.updateInfo?.version && typeof data.updateInfo?.enabled === 'boolean') {
+      updateInfo = { ...data.updateInfo };
+    }
     if (data.terminalSessions) {
       terminalSessions = data.terminalSessions;
       activeTerminalSessionId = data.terminalSessions[0]?.id ?? null;
@@ -890,6 +920,11 @@ export class CancellablePromise<T> extends Promise<T> {
   setLauncherRunResult(result: any | null) {
     launcherRunResult = result;
   },
+  // Flip the mocked build between a dev build (default: updater disabled)
+  // and a configured release build (update UI fully interactive).
+  setUpdateInfo(info: { version: string; enabled: boolean }) {
+    updateInfo = { ...info };
+  },
   // Exercise LauncherService.Show/Hide/Toggle through the same name-based
   // dispatcher used by generated bindings, while exposing enough state to
   // assert the native-window event contract.
@@ -913,6 +948,9 @@ if (seed) {
   if (seed.presets) Object.assign(presets, seed.presets);
   if (seed.commands) seedPresetsFromCommands(seed.commands);
   if (seed.settings) Object.assign(settings, seed.settings);
+  if (seed.updateInfo?.version && typeof seed.updateInfo?.enabled === 'boolean') {
+    updateInfo = { version: seed.updateInfo.version, enabled: seed.updateInfo.enabled };
+  }
   if (seed.terminalSessions) {
     terminalSessions = seed.terminalSessions;
     activeTerminalSessionId = seed.terminalSessions[0]?.id ?? null;

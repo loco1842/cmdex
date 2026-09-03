@@ -159,6 +159,15 @@ export class AppSettings {
              */
             this["launchAtLogin"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * AutoUpdateCheck enables the opt-in periodic background update check
+             * (UpdateService, every 12h). nil = unset, treated as disabled.
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["autoUpdateCheck"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

@@ -172,4 +172,8 @@ type AppSettings struct {
 	LauncherEnabled  *bool  `json:"launcherEnabled,omitempty"` // register the system-wide shortcut
 	LauncherShortcut string `json:"launcherShortcut"`          // accelerator, e.g. "CmdOrCtrl+Shift+K"
 	LaunchAtLogin    *bool  `json:"launchAtLogin,omitempty"`   // start Cmdex in the background at login
+
+	// AutoUpdateCheck enables the opt-in periodic background update check
+	// (UpdateService, every 12h). nil = unset, treated as disabled.
+	AutoUpdateCheck *bool `json:"autoUpdateCheck,omitempty"`
 }

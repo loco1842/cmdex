@@ -129,4 +129,5 @@ export interface SettingsPayload {
   windowY?: number;
   windowWidth?: number;
   windowHeight?: number;
+  autoUpdateCheck?: boolean;
 }

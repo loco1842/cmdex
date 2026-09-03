@@ -17,6 +17,9 @@ export interface CmdexE2ESeed {
     presets?: Record<string, Array<Record<string, unknown>>>;
     settings?: Record<string, unknown>;
     terminalSessions?: CmdexE2ETerminalSession[];
+    // Flip the mocked build between a dev build (default: updater disabled)
+    // and a configured release build (update UI fully interactive).
+    updateInfo?: { version: string; enabled: boolean };
 }
 
 // Keep in sync with the method names in e2e/mocks/runtime.ts's METHOD_IDS.
@@ -66,6 +69,11 @@ export type CmdexE2EMethodName =
     | 'PickDirectory'
     | 'ShowSettingsWindow'
     | 'ResetAllData'
+    | 'CheckForUpdates'
+    | 'GetAppVersion'
+    | 'GetSkippedVersion'
+    | 'GetUpdateState'
+    | 'UpdatesEnabled'
     | 'ApplySettings'
     | 'GetSessionID'
     | 'GetStatus'
@@ -120,6 +128,9 @@ declare global {
             // Configure the in-band launcher execution result used by launcher
             // search/output regression tests.
             setLauncherRunResult(result: Record<string, unknown> | null): void;
+            // Flip the mocked build between a dev build (default: updater
+            // disabled) and a configured release build (update UI interactive).
+            setUpdateInfo(info: { version: string; enabled: boolean }): void;
             invokeLauncher(method: 'Show' | 'Hide' | 'Toggle'): void;
             launcherVisible: boolean;
             launcherSessionId: string;

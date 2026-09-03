@@ -9,6 +9,15 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
+// appVersion is the release version without a "v" prefix (e.g. "0.4.0").
+// It is injected at build time via -ldflags "-X main.appVersion=..." (see the
+// per-OS Taskfiles and release.yml). Local builds keep the "dev" default, in
+// which case the in-app updater stays unconfigured (see updaterDisabled).
+var appVersion = "dev"
+
+// updaterGitHubRepo is the owner/repo the updater polls for releases.
+const updaterGitHubRepo = "loco1842/cmdex"
+
 //go:embed all:frontend/dist
 var assets embed.FS
 
@@ -38,6 +47,7 @@ func main() {
 			application.NewService(&ImportExportService{}),
 			application.NewService(&EventService{}),
 			application.NewService(&LauncherService{}),
+			application.NewService(&UpdateService{}),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(assets),
@@ -54,6 +64,9 @@ func main() {
 	cmdexMenu.AddSeparator()
 	cmdexMenu.Add("Settings...").SetAccelerator("CmdOrCtrl+,").OnClick(func(ctx *application.Context) {
 		appService.ShowSettingsWindow()
+	})
+	cmdexMenu.Add("Check for Updates...").OnClick(func(ctx *application.Context) {
+		checkForUpdatesFromMenu()
 	})
 	cmdexMenu.AddSeparator()
 	cmdexMenu.AddRole(application.Hide)
@@ -92,6 +105,8 @@ func main() {
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		app.Quit()
 	})
+
+	initUpdater(app)
 
 	if err := app.Run(); err != nil {
 		println("Error:", err.Error())

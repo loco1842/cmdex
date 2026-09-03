@@ -145,6 +145,44 @@ test.describe('Settings — General', () => {
       .toBe(true);
   });
 
+  test('Updates: dev builds show the dev state with a disabled check button', async ({ page, gotoSettings }) => {
+    await gotoSettings();
+    await goToGeneralTab(page);
+
+    await expect(page.getByText('Development build — updates are unavailable')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Check for Updates' })).toBeDisabled();
+    await expect(page.locator('#auto-update-check-toggle')).toHaveCount(0);
+  });
+
+  test('Updates: a configured build shows the version, checks, and persists the auto-check toggle', async ({
+    page,
+    seed,
+    gotoSettings,
+  }) => {
+    await seed({ updateInfo: { version: '0.4.0', enabled: true } });
+    await gotoSettings();
+    await goToGeneralTab(page);
+
+    await expect(page.getByText('Version 0.4.0')).toBeVisible();
+    const checkButton = page.getByRole('button', { name: 'Check for Updates' });
+    await expect(checkButton).toBeEnabled();
+    await checkButton.click();
+    await expect
+      .poll(() => page.evaluate(() => window.__cmdexE2E!.callLog.some((c) => c.method === 'CheckForUpdates')))
+      .toBe(true);
+
+    await page.locator('#auto-update-check-toggle').click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.__cmdexE2E!.callLog.some(
+            (c) => c.method === 'SetSettings' && (c.args[0] as string).includes('"autoUpdateCheck":true'),
+          ),
+        ),
+      )
+      .toBe(true);
+  });
+
   test('Danger Zone: the two-step confirm resets all data via ResetAllData', async ({ page, seed, gotoSettings }) => {
     await seed({ commands: [{
       id: 'cmd-to-wipe',

@@ -261,7 +261,15 @@
     "launcherSaveFailed": "Failed to save launcher settings: {{message}}",
     "launchAtLogin": "Launch at login",
     "launchAtLoginHint": "Start CmDex in the background when you log in, with only the launcher active.",
-    "launchAtLoginFailed": "Failed to update launch at login: {{message}}"
+    "launchAtLoginFailed": "Failed to update launch at login: {{message}}",
+    "updates": "Updates",
+    "currentVersion": "Version {{version}}",
+    "devVersion": "Development build — updates are unavailable",
+    "checkForUpdates": "Check for Updates",
+    "checkingForUpdates": "Checking…",
+    "checkFailed": "Couldn't check for updates: {{message}}",
+    "autoUpdateCheck": "Automatically check for updates",
+    "autoUpdateCheckHint": "Checks for new releases every 12 hours in the background. The update window only opens when a new version is found."
   },
   "resizablePanel": {
     "expandPanel": "Expand panel",
