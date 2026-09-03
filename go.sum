@@ -46,8 +46,8 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/wailsapp/wails/v3 v3.0.0-beta.12 h1:Vema2kFgJvkwPovQ8GMBBrkZNm5cKVR4bYzSCMgU+PU=
-github.com/wailsapp/wails/v3 v3.0.0-beta.12/go.mod h1:zKZYhB3WjrN5LhJWbnOAVMN0Xf8qTozbw2nf5micKl4=
+github.com/wailsapp/wails/v3 v3.0.0-beta.16 h1:ud3YMzTbPPae4EP3Wls4qBVsESZwwAkEny1P/zzw6Tk=
+github.com/wailsapp/wails/v3 v3.0.0-beta.16/go.mod h1:zKZYhB3WjrN5LhJWbnOAVMN0Xf8qTozbw2nf5micKl4=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 golang.org/x/exp v0.0.0-20260810151157-a8b543ca52da h1:YKw1FZDyWyXXZcBxalRHz3CHieUKnKxanrbcO280Zwc=
