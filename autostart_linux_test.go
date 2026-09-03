@@ -42,7 +42,7 @@ func TestQuoteDesktopEntryArg(t *testing.T) {
 	}{
 		{name: "spaces", arg: "/opt/CmDex App/cmdex", want: `"/opt/CmDex App/cmdex"`},
 		{name: "field code marker", arg: "/opt/100%/cmdex", want: `"/opt/100%%/cmdex"`},
-		{name: "desktop metacharacters", arg: "/opt/CmDex\\\"" + "`" + "/cmdex", want: `"` + `/opt/CmDex\\\"` + "\\`" + `/cmdex"`},
+		{name: "desktop metacharacters", arg: "/opt/CmDex\\\"" + "`" + "/cmdex", want: `"` + `/opt/CmDex` + `\\\\` + `\"` + "\\`" + `/cmdex"`},
 		{name: "literal backslash", arg: `/opt/CmDex\bin/cmdex`, want: `"/opt/CmDex\\\\bin/cmdex"`},
 		{name: "literal dollar sign", arg: `/opt/$CmDex/cmdex`, want: `"/opt/\\$CmDex/cmdex"`},
 		{name: "control characters", arg: "/opt/CmDex\tApp\ncmdex", want: `"/opt/CmDex\tApp\ncmdex"`},
@@ -62,6 +62,7 @@ func TestQuoteDesktopEntryArgRoundTripsReservedCharacters(t *testing.T) {
 		`/opt/CmDex\bin/cmdex`,
 		`/opt/$CmDex/cmdex`,
 		`/opt/CmDex\$bin/cmdex`,
+		"/opt/CmDex\\\"" + "`" + "/cmdex",
 	}
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
