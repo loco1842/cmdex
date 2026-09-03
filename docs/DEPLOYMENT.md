@@ -230,7 +230,7 @@ A successful release should contain the following files in the GitHub Release:
 For production deployment, the following environment variables and configuration settings are relevant:
 
 - **Server Mode**: When running `task build:server` for container deployment, the Docker image exposes port `8080` and listens on `0.0.0.0` by default (set via `WAILS_SERVER_HOST` in `Dockerfile.server`). Override at runtime with `docker run -e WAILS_SERVER_HOST=...`.
-- **Application Settings**: All user-facing configuration (themes, typography, locale, terminal preferences) is stored in the local SQLite database and managed through the in-app Settings modal. See [CONFIGURATION.md](CONFIGURATION.md) for the full list of configurable options.
+- **Application Settings**: All user-facing configuration (themes, typography, locale, and launcher settings) is stored in the local SQLite database and managed through the in-app Settings modal. Terminal behavior is provided by the built-in PTY and is not an external-terminal preference. See [CONFIGURATION.md](CONFIGURATION.md) for the full list of configurable options.
 - **Secrets**: No API keys or external service credentials are required by the application itself. Signing credentials for platform distribution (Apple Developer ID, Windows Authenticode certificate, PGP key) should be stored as CI secrets or in the system keychain via `wails3 setup signing`.
 
 <!-- VERIFY: Server mode port and host defaults are from Dockerfile.server — confirm these match production deployment expectations -->

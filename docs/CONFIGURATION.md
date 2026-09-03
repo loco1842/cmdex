@@ -52,13 +52,13 @@ Controls the spacing and compactness of the UI.
 
 ---
 
-## 3. Terminal Settings
+## 3. Terminal Behaviour
 
-Cmdex runs commands in its own **built-in PTY-backed terminal** (xterm.js on the frontend, `TerminalService` on the backend). There is no external-terminal-emulator preference: the old `terminal` setting and the "Run in Terminal" feature were both removed when execution moved into the embedded terminal.
+Cmdex runs commands in its own **built-in PTY-backed terminal** (xterm.js on the frontend, `TerminalService` on the backend). There is no external-terminal-emulator preference: the old `terminal` setting and the "Run in Terminal" feature were both removed when execution moved into the embedded terminal. A legacy `terminal` key found in an older settings JSON blob is ignored; it is not a persisted `AppSettings` field.
 
 The shell used for each session is chosen by the backend — `$SHELL` on macOS/Linux (falling back to `/bin/sh`), `cmd` on Windows.
 
-Up to **10** terminal sessions (`MaxSessions` in `terminal_service.go`) may be open at once. Panel height and collapsed state are stored in `localStorage`, not the database, since they are per-machine UI state.
+Up to **10 user-visible** terminal sessions (`MaxSessions` in `terminal_service.go`) may be open at once. The launcher's hidden internal session is excluded from this limit. Panel height and collapsed state are stored in `localStorage`, not the database, since they are per-machine UI state.
 
 ### Shell Integration
 
@@ -71,6 +71,66 @@ Shell integration activates OSC 133 semantic-prompt markers in the session's she
 Supported shells: **bash**, **zsh**, **fish**, and **PowerShell**. Integration works by pointing the shell at extra startup files that Cmdex materializes under `~/.cmdex` — it never modifies the user's own dotfiles.
 
 > A change to this setting applies to **newly started sessions only**. Existing sessions keep whatever mode they were started with.
+
+---
+
+## 3a. Global Quick Launcher
+
+The quick launcher is a Spotlight-style command palette that can be summoned
+from anywhere in the operating system, without CmDex being focused.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Global quick launcher | Disabled | Registers the system-wide shortcut after you explicitly enable it |
+| Launcher shortcut | `Cmd+Shift+K` (macOS) / `Ctrl+Shift+K` (Windows/Linux) | Toggles the launcher |
+| Launch at login | Disabled | Starts CmDex in the background at login |
+
+The default avoids known OS bindings: Spotlight (`Cmd+Space`), the macOS emoji
+picker (`Ctrl+Cmd+Space`), and the Windows/Linux window menu (`Alt+Space`).
+
+### Behaviour
+
+- The shortcut **toggles** the launcher: press once to show, again to hide.
+- `↑`/`↓` move the selection, `Enter` runs the highlighted command, `Esc` closes.
+- Commands with `{{variables}}` open the same variable-entry dialog the main
+  window uses; commands without variables run immediately.
+- Commands run in the launcher's **own persistent terminal session**, which is
+  started once with the app and reused for every invocation. It streams into a
+  panel below the search field and is hidden from the main window's terminal
+  tabs. `Esc` returns from the output panel to the search field.
+- The launcher hides when it loses focus. Its window and terminal session are
+  created once and reused, so reopening is instant and previous output is
+  retained. The regular terminal tabs and their actions (including Copy Last
+  Output and Clear) remain unchanged; only the launcher's internal session is
+  hidden.
+
+### Accelerator format
+
+Accelerators are `+`-separated, case-insensitive tokens: `Cmd`/`Command`/`Super`,
+`Ctrl`, `Alt`/`Option`, `Shift`, and `CmdOrCtrl` (Command on macOS, Control
+elsewhere). The key may be `A`–`Z`, `0`–`9`, `F1`–`F20`, `Space`, `Enter`, `Tab`,
+`Esc`, `Delete`, or an arrow key. At least one modifier is required — a bare key
+would be unusable in every other application.
+
+### Platform support and limitations
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS | Supported | Uses Wails' native global shortcut manager, which does not require Accessibility permission. The launcher floats above full-screen apps, is available on every Space, and opens on the display containing the pointer. |
+| Windows | Supported | Uses Win32 `RegisterHotKey` and does not require CGO. Appears above normal windows on the active virtual desktop. |
+| Linux (X11) | Supported | Uses `XGrabKey`. Some keys map to multiple modifier bits, so an exotic combination may not register. |
+| Linux (Wayland) | Supported | Uses the desktop portal's `org.freedesktop.portal.GlobalShortcuts` interface. The compositor may assign or adjust the final binding; `LauncherStatus.registered` reflects the requested registration, not the compositor's final choice. |
+
+Additional known limitations:
+
+- **Multi-monitor:** on macOS the launcher opens on the display containing the
+  pointer when the shortcut is pressed, including displays with negative
+  coordinates. On other platforms, Wails' screen API is used and may fall back
+  to the primary display when no current window screen is available.
+- **Shortcut conflicts:** registration may fail when another application already
+  uses the combination. `LauncherService.ApplySettings`
+  exposes that registration error in the launcher status so Settings can show
+  the user why the shortcut is unavailable.
 
 ---
 
@@ -115,7 +175,6 @@ The `data` column contains a JSON object with the following fields:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `locale` | string | `"en"` | UI language code |
-| `terminal` | string | `""` | Preferred terminal ID; empty = auto-detect |
 | `theme` | string | `"vscode-dark"` | Active theme ID |
 | `lastDarkTheme` | string | `"vscode-dark"` | Last selected dark theme |
 | `lastLightTheme` | string | `"vscode-light"` | Last selected light theme |
@@ -127,6 +186,9 @@ The `data` column contains a JSON object with the following fields:
 | `windowY` | int | `-1` | Settings window Y position; `-1` = center |
 | `windowWidth` | int | `640` | Settings window width (min: 480) |
 | `windowHeight` | int | `520` | Settings window height (min: 400) |
+| `launcherEnabled` | bool | `false` | Register the system-wide quick launcher shortcut after explicit opt-in |
+| `launcherShortcut` | string | `"CmdOrCtrl+Shift+K"` | Global launcher accelerator |
+| `launchAtLogin` | bool | `false` | Start CmDex in the background at login |
 
 ### Persistence Behavior
 
@@ -289,6 +351,9 @@ This section consolidates all default values in one place. These originate from 
 | `defaultWorkingDir` | `{}` (empty OSPathMap; no OS-keyed paths) | `db.go` `GetSettings()` |
 | `windowX` | `-1` (center on screen) | `db.go` `GetSettings()` |
 | `windowY` | `-1` (center on screen) | `db.go` `GetSettings()` |
+| `launcherEnabled` | `false` | `db.go` `GetSettings()` |
+| `launcherShortcut` | `"CmdOrCtrl+Shift+K"` | `launcher_service.go` `DefaultLauncherShortcut` |
+| `launchAtLogin` | `false` | `db.go` `GetSettings()` |
 | `windowWidth` | `640` | `db.go` `GetSettings()` |
 | `windowHeight` | `520` | `db.go` `GetSettings()` |
 | `shellIntegration` | `nil` (unset → treated as enabled) | `models.go` `AppSettings` |
@@ -360,4 +425,3 @@ The `Taskfile.yml` supports the following task-level variable overrides for buil
 | `TAG` | `cmdex:latest` | Docker image tag for `build:docker` and `run:docker` tasks. |
 | `PORT` | `8080` | Host port mapping for `run:docker` task. |
 | `DEV` | `""` | When set to `"true"`, activates development-optimized frontend builds with HMR support. |
-

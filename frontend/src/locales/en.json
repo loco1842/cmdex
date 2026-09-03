@@ -249,7 +249,19 @@
     "browse": "Browse",
     "workingDirectoryHint": "Default directory for command execution when no per-command directory is set.",
     "shellIntegration": "Shell Integration",
-    "shellIntegrationHint": "Enables exact \"copy last output\" by adding OSC 133 markers to new terminal sessions. Takes effect for terminals opened after this is changed."
+    "shellIntegrationHint": "Enables exact \"copy last output\" by adding OSC 133 markers to new terminal sessions. Takes effect for terminals opened after this is changed.",
+    "launcherEnabled": "Global quick launcher",
+    "launcherEnabledHint": "Disabled by default; enable it to summon CmDex commands from anywhere with a system-wide shortcut.",
+    "launcherShortcut": "Launcher shortcut",
+    "launcherShortcutChange": "Change",
+    "launcherShortcutCapturing": "Press a key combination…",
+    "launcherRegistered": "Shortcut registered.",
+    "launcherNotRegistered": "Shortcut could not be registered. It may already be in use by another application.",
+    "launcherUnsupported": "This build cannot register global shortcuts.",
+    "launcherSaveFailed": "Failed to save launcher settings: {{message}}",
+    "launchAtLogin": "Launch at login",
+    "launchAtLoginHint": "Start CmDex in the background when you log in, with only the launcher active.",
+    "launchAtLoginFailed": "Failed to update launch at login: {{message}}"
   },
   "resizablePanel": {
     "expandPanel": "Expand panel",

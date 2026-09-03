@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import { type Command, type Category } from '../types';
 import { getCommandDisplayTitle } from '../utils/tab';
+import { filterCommands, scriptSnippet } from '../utils/commandSearch';
 import { Kbd, ShortcutLabel } from './ui/kbd';
 import { isCmdOrCtrl } from '../lib/shortcuts';
 import { FileText, Search, X } from 'lucide-react';
@@ -18,22 +19,6 @@ interface CommandPaletteProps {
   onClose: () => void;
   onOpen: (cmd: Command) => void;
   onExecute: (cmd: Command) => void;
-}
-
-function matches(query: string, cmd: Command): boolean {
-  const q = query.toLowerCase();
-  if (q.startsWith('#')) {
-    const tagQuery = q.slice(1);
-    if (!tagQuery) return (cmd.tags || []).length > 0;
-    return (cmd.tags || []).some((t) => t.toLowerCase().includes(tagQuery));
-  }
-  const displayTitle = getCommandDisplayTitle(cmd).toLowerCase();
-  const desc = cmd.description?.Valid ? cmd.description.String : '';
-  return (
-    displayTitle.includes(q) ||
-    desc.toLowerCase().includes(q) ||
-    (cmd.tags || []).some((t) => t.toLowerCase().includes(q))
-  );
 }
 
 /** Highlight substring matches in text */
@@ -48,12 +33,6 @@ function Highlight({ text, query }: { text: string; query: string }) {
       {text.slice(idx + query.length)}
     </>
   );
-}
-
-function scriptSnippet(content: string): string {
-  const body = content.replace(/^#!.*\n?/, '').trim();
-  const firstLine = body.split('\n').find((l) => l.trim()) || '';
-  return firstLine.length > 60 ? firstLine.slice(0, 57) + '…' : firstLine;
 }
 
 const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -75,11 +54,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
     return m;
   }, [categories]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim();
-    const list = q ? commands.filter((c) => matches(q, c)) : commands;
-    return list.slice(0, 30);
-  }, [query, commands]);
+  const filtered = useMemo(() => filterCommands(query, commands), [query, commands]);
 
   // Reset selection when results change
   useEffect(() => {

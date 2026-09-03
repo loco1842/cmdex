@@ -89,7 +89,7 @@ import {
 import { buildVariablesFromScript, variableDefinitionsToPrompts } from './utils/templateVars';
 import { copyText } from './utils/clipboard';
 import { MainLogo } from './assets/images/main-logo';
-import { applyTheme, applyDensity, applyFonts } from './lib/theme-apply';
+import { applyTheme, applyDensity, applyFonts, parseCustomThemes } from './lib/theme-apply';
 
 const TerminalComponent = lazy(() => import('./components/Terminal'));
 
@@ -443,7 +443,7 @@ function App() {
     // colors directly) still looks correct.
     useEffect(() => {
         const custom = customThemes.find((c) => c.id === theme);
-        applyTheme(theme, custom?.colors ?? null);
+        applyTheme(theme, custom?.colors);
         settingsRef.current.theme = theme;
         settingsRef.current.customThemes = customThemes;
         flushSettings();
@@ -596,13 +596,8 @@ function App() {
                     const rawCustomThemes = s.customThemes && s.customThemes !== '[]'
                         ? s.customThemes
                         : localStorage.getItem(CUSTOM_THEMES_KEY);
-                    if (rawCustomThemes) {
-                        const parsed = JSON.parse(rawCustomThemes);
-                        // A non-array payload must not reach state — the theme
-                        // effect calls .find() on it.
-                        if (Array.isArray(parsed)) migratedCustomThemes = parsed;
-                    }
-                } catch { /* ignore parse errors */ }
+                    migratedCustomThemes = parseCustomThemes(rawCustomThemes || undefined);
+                } catch { /* ignore migration errors */ }
 
                 // Apply locale
                 if (s.locale && s.locale !== i18n.language) {

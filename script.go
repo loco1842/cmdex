@@ -51,7 +51,13 @@ func ExtractTemplateVars(text string) []string {
 	return result
 }
 
-// ReplaceTemplateVars replaces all {{var}} placeholders with their values.
+// ReplaceTemplateVars replaces {{var}} placeholders when a value is present.
+// Placeholders without a value remain unchanged here; resolveScript validates
+// referenced required variables and applies evaluated defaults before dispatch.
+// Values are intentionally inserted verbatim: command variables may represent
+// shell fragments (for example, a generated flag list or a pipeline). Callers
+// that need shell-word safety should include the appropriate quoting in the
+// command template for its target shell.
 func ReplaceTemplateVars(content string, values map[string]string) string {
 	return templateVarRe.ReplaceAllStringFunc(content, func(match string) string {
 		name := match[2 : len(match)-2] // strip {{ and }}

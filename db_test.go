@@ -290,6 +290,13 @@ func TestReplaceTemplateVars(t *testing.T) {
 	if result != "echo hi" {
 		t.Errorf("ReplaceTemplateVars empty: got %q, want %q", result, "echo hi")
 	}
+
+	// Values are raw by contract so a variable can represent a shell fragment;
+	// command authors add quoting when they need a single shell word.
+	result = ReplaceTemplateVars("printf '%s' {{fragment}}", map[string]string{"fragment": "$(date +%s)"})
+	if result != "printf '%s' $(date +%s)" {
+		t.Errorf("ReplaceTemplateVars raw fragment: got %q, want shell fragment preserved", result)
+	}
 }
 
 func TestMergeDetectedVars(t *testing.T) {

@@ -49,7 +49,8 @@ cmdex/
 ├── settings_service.go        # User preferences persistence
 ├── importexport_service.go    # Data import / export
 ├── event_service.go           # Wails event name constants
-├── terminal_service.go        # Multi-session PTY terminals (MaxSessions = 10)
+├── terminal_service.go        # Multi-session PTY terminals (10 user-visible sessions)
+├── launcher_service.go        # Global launcher window, shortcut, and launch-at-login
 ├── pty_backend*.go            # PTY abstraction: creack/pty (Unix), ConPTY (Windows), mock
 ├── pty_env.go                 # TERM/COLORTERM/LANG for launchd-started GUI processes
 ├── shell_integration.go       # OSC 133 activation via embedded shell startup scripts
@@ -80,7 +81,7 @@ cmdex/
 
 **Key files to know:**
 
-- `main.go` — Defines the main window dimensions, menu bar, and registers all seven backend services.
+- `main.go` — Defines the main window dimensions, menu bar, and registers all eight backend services.
 - `app.go` — Holds `ServiceStartup` / `ServiceShutdown`, creates the settings window, and owns the package-level `db` / `executor` / `terminalSvc` / `wailsApp` variables every other service reads.
 - `execution_service.go` — Where "run a command" actually lives. Note that it dispatches into the terminal rather than executing anything itself; `executor.go`, despite the name, executes nothing.
 - `terminal_service.go` — The largest and most subtle file: session lifecycle, PTY read loops, and the concurrency rules around `sessionState`.
@@ -152,6 +153,7 @@ Cmdex uses Wails v3 **Services**. Each service is a struct registered in `main.g
 | `ImportExportService` | `importexport_service.go` | JSON import / export |
 | `EventService` | `event_service.go` | Event name constants |
 | `TerminalService` | `terminal_service.go` | Multi-session PTY terminals, output capture |
+| `LauncherService` | `launcher_service.go` | Global launcher window, shortcut, launch-at-login, and internal terminal |
 
 All services receive a `ServiceStartup` context for initialization and `ServiceShutdown` for cleanup.
 
@@ -381,4 +383,3 @@ Every pull request triggers the [CI workflow](.github/workflows/ci.yml), but onl
 | **Build check** | `task build` cross-platform build verification | Ubuntu, macOS, Windows | manual (`workflow_dispatch`) |
 
 The two automatic checks must pass before a PR can be merged; the manual jobs are triggered explicitly (e.g. before a release) rather than gating every PR. The CI caches Go modules, pnpm dependencies, Wails CLI, and platform-specific build tools (GTK, NSIS) to keep run times fast.
-

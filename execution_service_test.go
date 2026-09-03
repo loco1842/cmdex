@@ -136,6 +136,89 @@ func TestRunCommand_FinalCmdWithWorkingDir(t *testing.T) {
 	}
 }
 
+func TestRunCommandInSession_ResolvesDefaultsAndRequiresValues(t *testing.T) {
+	defer testWithTerminalSvc(t)()
+
+	initDB := launcherTestDB(t)
+	commandService := &CommandService{}
+	cmd, err := commandService.CreateCommand(
+		"variable command", "", "echo {{greeting}} {{required}}", "", nil,
+		[]VariableDefinition{
+			{Name: "greeting", Default: `"hello"`},
+			{Name: "required"},
+		}, OSPathMap{},
+	)
+	if err != nil {
+		t.Fatalf("CreateCommand failed: %v", err)
+	}
+	t.Cleanup(func() { _ = initDB.DeleteCommand(cmd.ID) })
+
+	session := terminalSvc.GetActiveSession()
+	if session == nil {
+		t.Fatal("test terminal has no active session")
+	}
+	svc := &ExecutionService{}
+	missing := svc.RunCommandInSession(cmd.ID, nil, session.ID)
+	if missing.Error != "missing required variable: required" {
+		t.Fatalf("missing variable error = %q, want required-variable validation", missing.Error)
+	}
+	if missing.ExitCode != -1 {
+		t.Fatalf("missing variable exit code = %d, want -1", missing.ExitCode)
+	}
+
+	resolved := svc.RunCommandInSession(cmd.ID, map[string]string{"required": "world"}, session.ID)
+	if resolved.Error != "" {
+		t.Fatalf("supplied variable error = %q, want empty", resolved.Error)
+	}
+	if !strings.Contains(resolved.FinalCmd, "echo hello world") {
+		t.Fatalf("resolved command = %q, want CEL default and supplied value", resolved.FinalCmd)
+	}
+}
+
+func TestResolveScript_AllowsExplicitDefaultThatEvaluatesEmpty(t *testing.T) {
+	cmd := Command{
+		ScriptContent: "echo {{optional}}",
+		Variables: []VariableDefinition{{
+			Name:    "optional",
+			Default: `env("CMDEX_TEST_UNSET_DEFAULT_7D2C")`,
+		}},
+	}
+
+	resolved, err := (&ExecutionService{}).resolveScript(cmd, nil)
+	if err != nil {
+		t.Fatalf("resolveScript returned error for empty evaluated default: %v", err)
+	}
+	if resolved != "echo" {
+		t.Fatalf("resolved script = %q, want empty default substituted", resolved)
+	}
+}
+
+func TestResolveScript_RequiresDefinitionWithoutDefault(t *testing.T) {
+	cmd := Command{
+		ScriptContent: "echo {{required}}",
+		Variables:     []VariableDefinition{{Name: "required"}},
+	}
+
+	if _, err := (&ExecutionService{}).resolveScript(cmd, nil); err == nil {
+		t.Fatal("resolveScript accepted a missing variable without a default")
+	}
+}
+
+func TestResolveScript_IgnoresUnusedRequiredDefinition(t *testing.T) {
+	cmd := Command{
+		ScriptContent: "echo hello",
+		Variables:     []VariableDefinition{{Name: "unused"}},
+	}
+
+	resolved, err := (&ExecutionService{}).resolveScript(cmd, nil)
+	if err != nil {
+		t.Fatalf("resolveScript rejected an unused required definition: %v", err)
+	}
+	if resolved != "echo hello" {
+		t.Fatalf("resolved script = %q, want unchanged script", resolved)
+	}
+}
+
 func TestRunCommand_FinalCmdNoWorkingDir(t *testing.T) {
 	defer testWithTerminalSvc(t)()
 

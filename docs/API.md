@@ -6,7 +6,7 @@ CmDex exposes its backend through Wails v3 **service method bindings** and **run
 
 ## Wails Service Architecture
 
-The Go backend registers seven services, each scoped to a domain:
+The Go backend registers eight services, each scoped to a domain:
 
 | Service | Go Struct | Frontend Module | Purpose |
 |---|---|---|---|
@@ -17,6 +17,7 @@ The Go backend registers seven services, each scoped to a domain:
 | ImportExportService | `ImportExportService` | `importexportservice.js` | Command import/export, theme template export |
 | EventService | `EventService` | `eventservice.js` | Event name constants for type-safe event handling |
 | TerminalService | `TerminalService` | `terminalservice.js` | Multi-session PTY-backed terminals, output capture |
+| LauncherService | `LauncherService` | `launcherservice.js` | Global launcher window, shortcut, launch-at-login, and internal terminal |
 
 Every service method returns a `CancellablePromise<T>` (from `@wailsio/runtime`). On error, the promise rejects — there is no explicit error return in the TypeScript signature.
 
@@ -35,7 +36,7 @@ import { GetCategories, CreateCategory, UpdateCategory, DeleteCategory,
          SearchCommands, ResetAllData }
     from '../bindings/cmdex/commandservice';
 
-import { GetVariables, RunCommand }
+import { GetVariables, RunCommand, RunCommandInSession }
     from '../bindings/cmdex/executionservice';
 
 import { GetSettings, SetSettings }
@@ -55,10 +56,15 @@ import { CreateSession, ListSessions, CloseSession, RenameSession,
          Write, Resize, Clear, GetLastOutput }
     from '../bindings/cmdex/terminalservice';
 
+import { Show, Hide, Toggle, Resize, GetSessionID, GetStatus,
+         ApplySettings, ValidateShortcut, SetLaunchAtLogin,
+         ShowMainWindow }
+    from '../bindings/cmdex/launcherservice';
+
 // Barrel import (all services + models)
 import { App, CommandService, EventService, ExecutionService,
          ImportExportService, SettingsService, TerminalService,
-         AppSettings, Category, Command, EventNames,
+         LauncherService, AppSettings, Category, Command, EventNames,
          ExecutionRecord, SessionInfo, TerminalLastOutput,
          VariableDefinition, VariablePreset, VariablePrompt }
     from '../bindings/cmdex';
@@ -443,10 +449,17 @@ const record: ExecutionRecord = await RunCommand(cmd.id, { message: 'hello world
 
 **What it does, in order:**
 
-1. Loads the command and substitutes `{{vars}}`.
+1. Loads the command, evaluates CEL/literal defaults, merges supplied values,
+   and rejects any required variable that remains empty before substituting
+   `{{vars}}`.
 2. Strips any shebang and trims trailing newlines.
 3. Resolves the active session's shell (falling back to `detectShell()` if the session hasn't started yet) and the working directory (empty if none is configured), then calls `buildCommandLine(shellPath, script, workingDir)` (`executor.go`).
 4. `buildCommandLine` prefixes a shell-dialect-correct `cd` (only if a working directory was resolved) — POSIX `cd '<dir>' && `, cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` — and terminates every line with the dialect's submit key (`\n` for POSIX, `\r` for cmd.exe/PowerShell — ConPTY has no tty line discipline and treats a bare LF as a literal keystroke rather than Enter). The result is passed to `TerminalService.Write` on the active session.
+
+Template values are substituted verbatim, including shell metacharacters. This
+deliberately supports variables that expand to shell fragments such as flag
+lists or pipelines; quote a placeholder in the command template when the
+value must be treated as one shell word.
 
 **Because it goes through a real PTY:**
 
@@ -482,6 +495,13 @@ if (last.available) {
   console.log(last.text, last.exitCode);
 }
 ```
+
+#### `RunCommandInSession(commandID: string, variables: Record<string, string>, sessionID: string)`
+
+Resolves and dispatches a command to the explicitly named session. It applies
+the same CEL defaults and required-variable validation as `RunCommand`, and is
+used by the launcher for its internal session. The session ID is an address,
+not an access-control boundary.
 
 ---
 
@@ -723,6 +743,41 @@ const names = await GetEventNames();
 // names.settingsChanged === "settings-changed"
 // names.settingsWindowClosing === "settings-window-closing"
 ```
+
+---
+
+## LauncherService API
+
+Controls the persistent global command launcher window and its dedicated
+internal terminal session. Internal sessions are hidden from the main window's
+UI and session limit, but session IDs remain addressable by the normal terminal
+and execution bindings; this is a UI/lifecycle convenience, not an access
+control boundary.
+
+### `Show()` / `Hide()` / `Toggle()`
+
+Shows, hides, or toggles the launcher window. `Resize(expanded)` switches
+between the search-only and inline-terminal sizes.
+
+### `GetSessionID()`
+
+Returns (and lazily creates) the launcher's dedicated internal terminal session.
+
+```typescript
+const sessionId: string = await GetSessionID();
+await RunCommandInSession(command.id, variables, sessionId);
+```
+
+### `GetStatus()` / `ApplySettings()`
+
+Reads or applies the persisted launcher shortcut and enabled state. Applying
+settings re-registers the global shortcut and reports registration failures in
+`LauncherStatus.error` rather than rejecting.
+
+### `ValidateShortcut(accelerator: string)` / `SetLaunchAtLogin(enabled: boolean)`
+
+Validates an accelerator without changing registration. `SetLaunchAtLogin`
+installs or removes the per-user login item and persists the preference.
 
 ---
 

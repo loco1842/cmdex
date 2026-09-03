@@ -15,6 +15,7 @@ var (
 	executor    *Executor
 	wailsApp    *application.App
 	terminalSvc *TerminalService
+	launcherSvc *LauncherService
 )
 
 const (

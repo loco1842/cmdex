@@ -21,11 +21,12 @@ type ptyWinsize struct {
 	Cols uint16
 }
 
-// MaxSessions is the maximum number of concurrent terminal sessions. Beyond
-// this limit, CreateSession returns an error to protect against unbounded
-// resource use. The number 10 is chosen as a reasonable cap that exceeds
-// normal user workflows (typical use is 1-3 sessions) while preventing
-// accidental resource exhaustion.
+// MaxSessions is the maximum number of concurrent user-visible terminal
+// sessions. Internal sessions, such as the launcher's hidden terminal, are
+// excluded from this limit. Beyond it, CreateSession returns an error to
+// protect against unbounded resource use. The number 10 is chosen as a
+// reasonable cap that exceeds normal user workflows (typical use is 1-3
+// sessions) while preventing accidental resource exhaustion.
 const MaxSessions = 10
 
 const (
@@ -60,6 +61,11 @@ const (
 	autoRestartDelay = 100 * time.Millisecond
 )
 
+// sessionReadyTimeout bounds a dispatch waiting for another goroutine to
+// finish starting or restarting a PTY. A backend that never returns must not
+// hold a launcher command indefinitely.
+var sessionReadyTimeout = 5 * time.Second
+
 // SessionInfo is the public metadata for a terminal session, sent to the frontend.
 type SessionInfo struct {
 	ID         string `json:"id"`
@@ -75,6 +81,10 @@ type sessionState struct {
 	name       string
 	workingDir string
 	createdAt  time.Time
+	// internal marks a session owned by app chrome rather than by the user's
+	// terminal tabs. Internal sessions are excluded from ListSessions and
+	// never become the active session.
+	internal bool
 
 	mu        sync.Mutex
 	ptmx      ptyHandle
@@ -92,6 +102,9 @@ type sessionState struct {
 	stopCh          chan struct{}
 	running         bool
 	starting        bool
+	startDone       chan struct{}
+	startDoneClosed bool
+	startErr        error
 	intentionalStop bool
 	closed          bool
 	// generation counts how many times Stop/CloseSession have invalidated
@@ -286,26 +299,55 @@ func (s *TerminalService) ServiceShutdown() error {
 
 // CreateSession creates a new terminal session with a UUID v4 ID and default name "Terminal N".
 func (s *TerminalService) CreateSession() (*SessionInfo, error) {
+	return s.createSession(false)
+}
+
+// CreateInternalSession creates a session owned by app chrome rather than by
+// the user's terminal tabs. It is hidden from ListSessions and never becomes
+// the active session.
+func (s *TerminalService) CreateInternalSession(name string) (*SessionInfo, error) {
+	return s.createSessionNamed(name, true)
+}
+
+func (s *TerminalService) createSession(internal bool) (*SessionInfo, error) {
+	return s.createSessionNamed("", internal)
+}
+
+func (s *TerminalService) createSessionNamed(name string, internal bool) (*SessionInfo, error) {
 	s.mu.Lock()
-	if n := len(s.sessions); n >= MaxSessions {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("CreateSession: max sessions reached (%d)", MaxSessions)
+	// Only user-visible sessions count against the limit. The launcher's hidden
+	// session would otherwise cost the user a terminal tab, or fail to start at
+	// all once MaxSessions tabs are open.
+	if !internal {
+		visible := 0
+		for _, existing := range s.sessions {
+			if !existing.internal {
+				visible++
+			}
+		}
+		if visible >= MaxSessions {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("CreateSession: max sessions reached (%d)", MaxSessions)
+		}
 	}
 
-	s.sessionCounter++
-	name := fmt.Sprintf("Terminal %d", s.sessionCounter)
+	if name == "" {
+		s.sessionCounter++
+		name = fmt.Sprintf("Terminal %d", s.sessionCounter)
+	}
 	id := uuid.New().String()
 
 	ss := &sessionState{
 		id:         id,
 		name:       name,
+		internal:   internal,
 		workingDir: getWorkingDir(),
 		createdAt:  time.Now(),
 		lastSize:   ptyWinsize{Rows: defaultTerminalRows, Cols: defaultTerminalCols},
 	}
 
 	s.sessions[id] = ss
-	if s.activeSessionID == "" {
+	if !internal && s.activeSessionID == "" {
 		s.activeSessionID = id
 	}
 	s.mu.Unlock()
@@ -343,6 +385,9 @@ func (s *TerminalService) ListSessions() []*SessionInfo {
 
 	result := make([]*SessionInfo, 0, len(s.sessions))
 	for _, ss := range s.sessions {
+		if ss.internal {
+			continue
+		}
 		result = append(result, ss.info())
 	}
 	return result
@@ -363,6 +408,9 @@ func (s *TerminalService) CloseSession(id string) error {
 	if s.activeSessionID == id {
 		s.activeSessionID = ""
 		for otherID := range s.sessions {
+			if s.sessions[otherID].internal {
+				continue
+			}
 			s.activeSessionID = otherID
 			break
 		}
@@ -383,6 +431,7 @@ func (s *TerminalService) CloseSession(id string) error {
 	ss.proc = nil
 	ss.running = false
 	ss.closed = true
+	ss.signalStartDoneLocked()
 	ss.mu.Unlock()
 	s.mu.Unlock()
 
@@ -420,6 +469,9 @@ func (s *TerminalService) SetActiveSession(id string) error {
 	if _, ok := s.sessions[id]; !ok {
 		return fmt.Errorf("SetActiveSession: session not found: %s", id)
 	}
+	if s.sessions[id].internal {
+		return fmt.Errorf("SetActiveSession: session is internal: %s", id)
+	}
 
 	s.activeSessionID = id
 	return nil
@@ -442,6 +494,20 @@ func (s *TerminalService) GetActiveSession() *SessionInfo {
 	return ss.info()
 }
 
+// hasSession reports whether an ID is still owned by TerminalService. It is
+// intentionally private: launcher recovery uses it to avoid returning an ID
+// after CloseSession removed the internal PTY, while the public API continues
+// to expose only user-visible session inventory.
+func (s *TerminalService) hasSession(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.mu.RLock()
+	_, ok := s.sessions[id]
+	s.mu.RUnlock()
+	return ok
+}
+
 // ========== Per-Session PTY Lifecycle ==========
 
 // startSessionLocked starts a PTY shell for the given session.
@@ -451,6 +517,9 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 		return nil
 	}
 	ss.starting = true
+	ss.startDone = make(chan struct{})
+	ss.startDoneClosed = false
+	ss.startErr = nil
 	// Snapshotted before unlocking below for the blocking shell-integration
 	// setup and ptyBackend.Start calls — see the staleness check once
 	// relocked, and the generation field's own comment for why this exists.
@@ -522,7 +591,6 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	handle, proc, err := s.ptyBackend.Start(shellPath, launchFlag, ss.workingDir, rows, cols, opts)
 
 	ss.mu.Lock()
-	ss.starting = false
 
 	// Stop or CloseSession bumped ss.generation while we were unlocked
 	// above — the caller already asked to stop this session, so the PTY
@@ -533,6 +601,11 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	// s.sessions), leaking a real shell process and its would-be
 	// readLoop/monitorExit goroutines with no way to ever stop them again.
 	if stale := ss.generation != startGen; stale || err != nil {
+		startErr := err
+		if stale {
+			startErr = errors.New("session stopped while starting")
+		}
+		ss.finishStartLocked(startErr)
 		ss.mu.Unlock()
 		if nonceFileCleanup != nil {
 			nonceFileCleanup()
@@ -544,10 +617,7 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 			}
 		}
 		ss.mu.Lock()
-		if stale {
-			return errors.New("session stopped while starting")
-		}
-		return err
+		return startErr
 	}
 
 	// The integration script deletes the nonce file itself within
@@ -572,8 +642,26 @@ func (s *TerminalService) startSessionLocked(ss *sessionState, cols, rows int) e
 	ss.readerWg.Add(1)
 	go ss.readLoop(handle, stopCh, integrated)
 	go s.monitorExit(ss, proc, stopCh)
+	ss.finishStartLocked(nil)
 
 	return nil
+}
+
+// signalStartDoneLocked wakes dispatchers waiting for a lifecycle transition.
+// It is safe to call this from Stop/CloseSession while the actual backend
+// start is still running; the in-flight start will observe generation and
+// discard its result when it reacquires ss.mu.
+func (ss *sessionState) signalStartDoneLocked() {
+	if ss.startDone != nil && !ss.startDoneClosed {
+		close(ss.startDone)
+		ss.startDoneClosed = true
+	}
+}
+
+func (ss *sessionState) finishStartLocked(err error) {
+	ss.startErr = err
+	ss.starting = false
+	ss.signalStartDoneLocked()
 }
 
 // stopSessionLocked signals the session's goroutines to stop by closing stopCh.
@@ -748,8 +836,6 @@ func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh 
 
 	ss.mu.Lock()
 	intentional := ss.intentionalStop || exitCode == 0
-	cols := int(ss.lastSize.Cols)
-	rows := int(ss.lastSize.Rows)
 	ss.mu.Unlock()
 
 	if wailsApp != nil {
@@ -766,48 +852,139 @@ func (s *TerminalService) monitorExit(ss *sessionState, proc ptyProcess, stopCh 
 		return
 	}
 
-	// Unintentional exit (crash) — auto-restart after brief delay.
-	time.Sleep(autoRestartDelay)
-	if err := s.Start(ss.id, cols, rows); err != nil {
+	// Unintentional exit (crash) — auto-restart after a brief, cancellable
+	// delay. Stop/CloseSession may happen while the delay is pending.
+	if !waitForAutoRestart(stopCh) {
+		return
+	}
+
+	// Re-check ownership after the timer fires. Stop/CloseSession can race the
+	// timer wake-up, and startSessionLocked must not resurrect that lifecycle.
+	ss.mu.Lock()
+	if ss.closed || ss.intentionalStop || ss.stopCh != stopCh {
+		ss.mu.Unlock()
+		return
+	}
+	// Resize may have run while the restart delay was pending. Read the latest
+	// dimensions while holding ss.mu immediately before starting the replacement
+	// PTY, rather than reusing the size captured before the delay.
+	cols := int(ss.lastSize.Cols)
+	rows := int(ss.lastSize.Rows)
+	err := s.startSessionLocked(ss, cols, rows)
+	ss.mu.Unlock()
+	if err != nil {
 		fmt.Printf("monitorExit: auto-restart failed for session %s: %v\n", ss.id, err)
+	}
+}
+
+// waitForAutoRestart waits for the crash-restart delay unless the owning
+// session is stopped first. Keeping the timer selection separate makes the
+// cancellation behavior deterministic to test without sleeping in a test.
+var waitForAutoRestart = func(stopCh <-chan struct{}) bool {
+	return waitForAutoRestartTimer(stopCh, time.NewTimer(autoRestartDelay))
+}
+
+func waitForAutoRestartTimer(stopCh <-chan struct{}, timer *time.Timer) bool {
+	defer timer.Stop()
+	select {
+	case <-stopCh:
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
 // ========== Session Dispatch Methods ==========
 
-// Write sends input data to the specified session's PTY.
+// Write sends input data to the specified session's PTY. Session IDs are
+// intentionally addressable regardless of the internal flag: internal status
+// controls UI visibility/lifecycle only, not access control.
 func (s *TerminalService) Write(sessionId string, data string) error {
 	ss, err := s.resolveSession(sessionId)
 	if err != nil {
 		return err
 	}
 
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-
-	if ss.closed {
-		return fmt.Errorf("session closed: %s", sessionId)
-	}
-
-	if !ss.running {
-		if err := s.startSessionLocked(ss, int(ss.lastSize.Cols), int(ss.lastSize.Rows)); err != nil {
-			return err
+	for {
+		ss.mu.Lock()
+		if ss.closed {
+			ss.mu.Unlock()
+			return fmt.Errorf("session closed: %s", sessionId)
 		}
-	}
 
-	if ss.ptmx == nil {
-		return errors.New("terminal not started")
-	}
+		// monitorExit holds ss.mu while it transitions through the restart
+		// lifecycle, but startSessionLocked releases it around the blocking
+		// backend call. Waiting here closes that window for dispatchers: they
+		// cannot mistake the intentionally empty hand-off state for a dead
+		// terminal and report the intermittent "terminal not started" error.
+		if ss.starting {
+			done := ss.startDone
+			generation := ss.generation
+			ss.mu.Unlock()
+			if err := waitForSessionReady(done); err != nil {
+				return err
+			}
 
-	b := []byte(data)
-	for len(b) > 0 {
-		n, err := ss.ptmx.Write(b)
-		if err != nil {
-			return err
+			ss.mu.Lock()
+			if ss.closed {
+				ss.mu.Unlock()
+				return fmt.Errorf("session closed: %s", sessionId)
+			}
+			if ss.generation != generation {
+				ss.mu.Unlock()
+				return errors.New("session stopped while starting")
+			}
+			startErr := ss.startErr
+			running := ss.running
+			started := ss.ptmx != nil
+			ss.mu.Unlock()
+			if startErr != nil {
+				return startErr
+			}
+			if !running || !started {
+				return errors.New("terminal not started")
+			}
+			continue
 		}
-		b = b[n:]
+
+		if !ss.running {
+			if err := s.startSessionLocked(ss, int(ss.lastSize.Cols), int(ss.lastSize.Rows)); err != nil {
+				ss.mu.Unlock()
+				return err
+			}
+		}
+
+		if ss.ptmx == nil {
+			ss.mu.Unlock()
+			return errors.New("terminal not started")
+		}
+
+		b := []byte(data)
+		for len(b) > 0 {
+			n, err := ss.ptmx.Write(b)
+			if err != nil {
+				ss.mu.Unlock()
+				return err
+			}
+			b = b[n:]
+		}
+		ss.mu.Unlock()
+		return nil
 	}
-	return nil
+}
+
+var waitForSessionReady = func(done <-chan struct{}) error {
+	if done == nil {
+		return errors.New("terminal start state unavailable")
+	}
+	timer := time.NewTimer(sessionReadyTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return errors.New("terminal start timed out")
+	}
 }
 
 // Resize changes the terminal dimensions for the specified session.
@@ -948,6 +1125,7 @@ func (s *TerminalService) Stop(sessionId string) error {
 	ss.ptmx = nil
 	ss.proc = nil
 	ss.running = false
+	ss.signalStartDoneLocked()
 	ss.mu.Unlock()
 
 	s.releaseOldProcess(ss, oldPtmx, oldProc)

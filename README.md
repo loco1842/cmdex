@@ -42,6 +42,7 @@ No build tools, no terminal setup — just download, install, and start saving c
 - **Real Built-in Terminal** — Commands run in a genuine PTY-backed terminal inside CmDex (powered by xterm.js), so interactive prompts, colors, and Ctrl+C all work. Open up to 10 terminal sessions side by side.
 - **Exact Output Copying** — Optional shell integration (bash, zsh, fish, PowerShell) marks where each command's output begins and ends, so "copy last output" gives you exactly that — no prompt text, no reflow artifacts.
 - **Lightning Search** — Find any command by title, description, tag, or script content in milliseconds (powered by SQLite FTS5).
+- **Global Quick Launcher** — Summon your commands from anywhere with `Cmd/Ctrl+Shift+K`, Spotlight-style. Search, hit Enter, and watch the output stream in a panel right below — then press Esc and get back to what you were doing. ([details & platform notes](docs/CONFIGURATION.md#3a-global-quick-launcher))
 - **Fully Local** — Everything lives on your machine in `~/.cmdex/cmdex.db`. No accounts, no cloud, no subscriptions.
 - **Dark & Polished** — A premium dark UI with glassmorphism, smooth animations, and a layout that feels right at home on any OS.
 

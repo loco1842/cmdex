@@ -4,7 +4,7 @@
 
 CmDex is a cross-platform desktop application for saving, organizing, and executing CLI commands with template variable support. It is built as a single-binary desktop app using **Wails v3**, which binds a **Go** backend to a **React 19 + TypeScript** frontend. All data is stored locally in a **SQLite** database with no external services or cloud dependencies.
 
-The backend is service-oriented: discrete Wails v3 services expose domain operations (commands, execution, settings, import/export, terminals) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with a tab-based command editor, a searchable sidebar, a **real PTY-backed terminal panel**, and a separate settings window.
+The backend is service-oriented: discrete Wails v3 services expose domain operations (commands, execution, settings, import/export, terminals, and the launcher) to the frontend via auto-generated TypeScript bindings. The frontend is a single-page React application with a tab-based command editor, a searchable sidebar, a **real PTY-backed terminal panel**, and three native-window UIs: the main editor, settings, and global launcher.
 
 The defining architectural fact: **commands are not run by a Go subprocess helper.** They are typed into a live pseudo-terminal, exactly as if the user had typed them. Everything about output handling, interactivity, and signal delivery follows from that.
 
@@ -71,7 +71,7 @@ The `App` struct manages application lifecycle and the secondary settings window
 
 ### Services
 
-CmDex registers **seven** Wails v3 services in `main.go`:
+CmDex registers **eight** Wails v3 services in `main.go`:
 
 | Service | File | Responsibility |
 |---------|------|----------------|
@@ -82,6 +82,7 @@ CmDex registers **seven** Wails v3 services in `main.go`:
 | `ImportExportService` | `importexport_service.go` | Export/import commands as JSON, save theme templates |
 | `EventService` | `event_service.go` | Exposes event name constants so both sides use the same strings |
 | `TerminalService` | `terminal_service.go` | Multi-session PTY terminals, output capture, shell integration |
+| `LauncherService` | `launcher_service.go` | Global launcher window, shortcut registration, launch-at-login, and its internal terminal session |
 
 ### Database (`db.go`)
 
@@ -97,7 +98,7 @@ This is the largest and most subtle part of the backend.
 
 | File | Role |
 |---|---|
-| `terminal_service.go` | Session registry (up to `MaxSessions` = 10), per-session PTY + read-loop goroutine, `Write`/`Resize`/`Clear`/`Start`/`Stop` |
+| `terminal_service.go` | Session registry (up to `MaxSessions` = 10 user-visible sessions; internal launcher sessions excluded), per-session PTY + read-loop goroutine, `Write`/`Resize`/`Clear`/`Start`/`Stop` |
 | `pty_backend.go` | The `ptyHandle` / `ptyProcess` interfaces the service is written against |
 | `pty_backend_unix.go` | `creack/pty` implementation |
 | `pty_backend_windows.go` | Real ConPTY implementation via `charmbracelet/x/conpty` |
@@ -140,8 +141,8 @@ Integration is toggled by `AppSettings.ShellIntegration` (nil = enabled). Change
 
 `RunCommand(commandID, variables)` does the following:
 
-1. Load the command; substitute `{{vars}}` via `ReplaceTemplateVars`.
-2. `stripShebang`, then trim trailing newlines.
+1. Load the command, evaluate CEL defaults, and merge supplied variable values. A referenced required variable with neither a supplied value nor a default stops here; `RunCommand` returns an in-band `ExecutionRecord{ExitCode: -1, Error: ...}` before writing to the PTY. Unused variable definitions do not block execution.
+2. Substitute `{{vars}}` via `ReplaceTemplateVars`, then `stripShebang` and trim trailing newlines. Placeholders with no definition remain unchanged because that low-level helper does not validate them.
 3. Resolve the active session's shell (`SessionInfo.ShellPath`, falling back to `detectShell()` for a not-yet-started session) and the working directory (`""` if none is configured), then call `buildCommandLine(shellPath, script, workingDir)`.
 4. `buildCommandLine` classifies the shell by base name into a dialect (POSIX / cmd.exe / PowerShell — see `shellDialectFor`) and composes the final line: an optional cd prefix syntactically correct for that dialect — POSIX `cd '<dir>' && ` (`shellQuoteDir`), cmd.exe `cd /d "<dir>" && `, or PowerShell `Set-Location -LiteralPath '<dir>' -ErrorAction Stop; ` (Windows PowerShell 5.1 has no `&&` operator; `-ErrorAction Stop` preserves short-circuit-on-failure) — followed by the script, with every line terminated by the dialect's actual submit key: `\n` for POSIX (a Unix pty's line discipline accepts it), `\r` for cmd.exe/PowerShell (ConPTY has no line discipline and delivers a bare LF as a literal Ctrl+J, not Enter — see issue #63). Write the finished line to the **active session's PTY** via `terminalSvc.Write`.
 
@@ -151,7 +152,7 @@ Consequences worth internalizing:
 - **No execution history is persisted.** `db.go` still defines `GetExecutions`/`AddExecution`/`ClearExecutions` and the `executions` table still exists, but nothing in production calls them — they are referenced only from `execution_service_test.go`. Vestigial.
 - Ctrl+C works naturally: the PTY has a real foreground process group.
 - Interactive prompts, colors, and TUIs work, because it is a real terminal.
-- With no active session (or a nil `terminalSvc`), `RunCommand` returns `ExecutionRecord{ExitCode: -1, Error: ...}` rather than rejecting the promise.
+- With no active session, a nil `terminalSvc`, or a missing referenced required variable, `RunCommand` returns `ExecutionRecord{ExitCode: -1, Error: ...}` rather than writing to the PTY or rejecting the promise.
 
 ### Script Handling (`script.go`)
 
@@ -159,7 +160,7 @@ Pure functions, no I/O:
 
 - **`GenerateScript`** — trims the body and adds a trailing newline. **It does not add a shebang.**
 - **`ParseScriptBody`** — strips a leading `#!` line, so scripts saved by older versions (which did store `#!/bin/bash`) still edit cleanly.
-- **`ExtractTemplateVars`** / **`ReplaceTemplateVars`** — `{{varName}}` detection (unique, in order of first appearance) and substitution. Unresolved placeholders are left as-is.
+- **`ExtractTemplateVars`** / **`ReplaceTemplateVars`** — `{{varName}}` detection (unique, in order of first appearance) and verbatim substitution. The helper leaves placeholders without values unchanged; `ExecutionService.resolveScript` evaluates defaults, rejects referenced required variables without a value before PTY dispatch, and ignores unused variable definitions. Command authors add shell quoting when a value must remain one word.
 - **`MergeDetectedVars`** — merges auto-detected variables with manually defined ones: detected first in detection order, then manual-only variables with their relative order preserved, with metadata (description, default, example) carried over.
 
 ### Working Directory Resolution
@@ -191,10 +192,11 @@ Note the deliberate asymmetry: `hasExplicitWorkingDir` decides whether to emit a
 
 ### Application Entry (`main.tsx`)
 
-The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the build prefers a simple bundle (no vendor code-splitting) and only lazy-loads heavy entry points — `App` vs `SettingsPage`, and the xterm `Terminal`. It renders one of two UIs based on the URL:
+The frontend is a Vite-built SPA embedded by Wails. Assets load locally, so the build prefers a simple bundle (no vendor code-splitting) and only lazy-loads heavy entry points — `App` vs `SettingsPage`, and the xterm `Terminal`. Wails creates three native windows, all served by this same bundle, and the frontend renders one of three UIs based on the URL:
 
 - **Main Window** (`/`, no query param) — lazily loads `<App />`
 - **Settings Window** (`/?window=settings`) — lazily loads `<SettingsPage />`, which persists preferences independently and emits `settings-changed` back to the main window
+- **Launcher Window** (`/?window=launcher`) — renders `<Launcher />` in a persistent, hidden-until-summoned window.
 
 ### Main App Structure (`App.tsx`)
 
@@ -221,6 +223,8 @@ The terminal panel is **shared, not per-tab**. It has its own session tabs, inde
 | `TerminalTabBar` | Terminal session tabs (create, rename, close, activate) |
 | `VariablePrompt` | Modal form for filling template variables before running |
 | `CommandPalette` | Quick-search overlay |
+| `Launcher` | Global quick-launcher UI rendered in its own window |
+| `LauncherSettings` | Launcher enable, shortcut, and launch-at-login settings |
 | `SettingsPage` / `SettingsDialog` | Theme, density, font, locale, working directory, shell integration |
 | `ResizablePanel` | Collapsible/resizable panes |
 | `WelcomeTab` | Empty-state tab (`'__welcome__'`) |
@@ -288,7 +292,8 @@ User presses Run (⌘/Ctrl+Enter)
 ┌──────────────────────────────────────────────┐
 │ ExecutionService.RunCommand(id, variables)   │
 │   1. load command from DB                     │
-│   2. ReplaceTemplateVars → stripShebang       │
+│   2. resolveScript: defaults, validation,      │
+│      ReplaceTemplateVars → stripShebang       │
 │   3. buildCommandLine(shellPath, script, wd)  │
 │      → shell-dialect cd prefix + submit key   │
 │   4. terminalSvc.Write(activeSession, line)   │
@@ -356,7 +361,7 @@ Running commands by writing to a live PTY (rather than `exec`ing a temp script a
 
 ### 2. Wails v3 over v2
 
-Wails v3 introduces service-based registration (`application.NewService`) and an improved event system. Seven focused services replace v2's monolithic `App` struct.
+Wails v3 introduces service-based registration (`application.NewService`) and an improved event system. Eight focused services replace v2's monolithic `App` struct.
 
 ### 3. Pure-Go SQLite (`modernc.org/sqlite`)
 
@@ -366,9 +371,9 @@ Avoiding CGO keeps cross-compilation simple and ships a single static binary wit
 
 All React state lives in `App.tsx` with hooks and refs. For a single-user desktop app with no server, Redux/Zustand would add ceremony without benefit.
 
-### 5. Two-window architecture
+### 5. Three-window architecture
 
-Settings render in a separate native window (`/?window=settings`) rather than a modal, keeping the main UI uncluttered and letting the user close settings without disturbing editor context.
+Settings render in a separate native window (`/?window=settings`) rather than a modal, keeping the main UI uncluttered and letting the user close settings without disturbing editor context. The global launcher renders in its own persistent window (`/?window=launcher`) so its command palette and PTY remain available while the main editor stays hidden or focused elsewhere.
 
 ### 6. Inactive editor tabs stay mounted
 
@@ -432,7 +437,7 @@ cmdex/
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── main.tsx            # Routes between main & settings window
+│   │   ├── main.tsx            # Routes between main, settings & launcher windows
 │   │   ├── App.tsx             # Central state, tabs, modals, terminal sessions
 │   │   ├── types.ts            # TypeScript interfaces (mirror of Go models)
 │   │   ├── i18n.ts             # i18n configuration
@@ -460,7 +465,8 @@ cmdex/
 | Abstraction | File | Description |
 |---|---|---|
 | `DB` struct | `db.go` | Wrapper over `database/sql` with the `modernc.org/sqlite` driver. Owns migrations (version 10), FTS5 triggers, WAL mode, and every CRUD query the services use. |
-| `TerminalService` + `sessionState` | `terminal_service.go` | Session registry keyed by ID, capped at `MaxSessions`. Each `sessionState` holds its PTY handle, process, shell path, last size, capture buffers, and nonce, guarded by a per-session mutex. |
+| `TerminalService` + `sessionState` | `terminal_service.go` | Session registry keyed by ID, capped at `MaxSessions` user-visible sessions (internal launcher sessions excluded). Each `sessionState` holds its PTY handle, process, shell path, last size, capture buffers, and nonce, guarded by a per-session mutex. |
+| `LauncherService` | `launcher_service.go` | Persistent always-on-top launcher window, global shortcut, launch-at-login, and dedicated internal terminal session. |
 | `ptyHandle` / `ptyProcess` | `pty_backend.go` | The only interfaces the terminal service is written against, so Unix, Windows, and mock backends are interchangeable. |
 | `Executor` struct | `executor.go` | Shell selection (`$SHELL -lc` / `cmd /C`) plus CEL default evaluation. Constructed once at startup; executes nothing. |
 | `Command` struct | `models.go` | Central domain entity: nullable title/description (`sql.NullString`), embedded `VariableDefinition[]`/`VariablePreset[]`, an `OSPathMap` working directory, and a `DisplayTitle()` that falls back to script content. |

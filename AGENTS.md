@@ -47,17 +47,18 @@ make test
 
 ### Service registration (not the old v2 single-App pattern)
 
-In `main.go`, seven services are registered as `application.Service`:
+In `main.go`, eight services are registered as `application.Service`:
 
 | Service struct | File | Frontend binding import |
 |---|---|---|
 | `App` | `app.go` | `../bindings/cmdex/app` |
+| `TerminalService` | `terminal_service.go` | `../bindings/cmdex/terminalservice` |
 | `CommandService` | `command_service.go` | `../bindings/cmdex/commandservice` |
 | `ExecutionService` | `execution_service.go` | `../bindings/cmdex/executionservice` |
 | `SettingsService` | `settings_service.go` | `../bindings/cmdex/settingsservice` |
 | `ImportExportService` | `importexport_service.go` | `../bindings/cmdex/importexportservice` |
 | `EventService` | `event_service.go` | `../bindings/cmdex/eventservice` |
-| `TerminalService` | `terminal_service.go` (+ `pty_backend*.go`) | `../bindings/cmdex/terminalservice` |
+| `LauncherService` | `launcher_service.go` | `../bindings/cmdex/launcherservice` |
 
 Each service is a struct implementing `ServiceStartup(ctx, options) error`. Wails generates bindings from exported methods into `frontend/bindings/cmdex/<servicename>.js` (JS with JSDoc types, plus `models.js` and a barrel `index.js`). **Never hand-edit `frontend/bindings/`** — it's generated output, but it **is** committed (so a fresh clone type-checks without the Wails CLI installed); regenerate with `wails3 generate bindings` and commit the result alongside the Go change that caused it.
 
@@ -115,6 +116,7 @@ Events.On(`pty-cleared:${sessionId}`, handler);  // no payload
 | `app.go` | App lifecycle (`ServiceStartup`/`Shutdown`), settings window management; `db` and `executor` are package-level vars initialized here |
 | `command_service.go` | Category + Command CRUD, presets, reordering, FTS search, `ResetAllData` |
 | `execution_service.go` | `GetVariables` (CEL defaults), `RunCommand`, working-directory resolution |
+| `launcher_service.go` | Global launcher window, shortcut registration, launcher's internal terminal session |
 | `settings_service.go` | `GetSettings`, `SetSettings` (settings are one JSON blob) |
 | `importexport_service.go` | Import/export commands, theme templates |
 | `event_service.go` | `GetEventNames` — exposes event name strings to frontend |
@@ -122,7 +124,7 @@ Events.On(`pty-cleared:${sessionId}`, handler);  // no payload
 | `models.go` | Go domain types for Wails/JSON and SQL scanning |
 | `script.go` | `{{var}}` parsing and substitution, shebang *stripping* (pure functions, no I/O) |
 | `executor.go` | Shell selection, `stripShebang`, `shellQuoteDir`, `shellDialectFor`/`buildCommandLine` (per-shell cd prefix + line-submit key), CEL default evaluation. **Executes nothing** |
-| `terminal_service.go` | `TerminalService`: multi-session PTY terminals, `MaxSessions = 10` |
+| `terminal_service.go` | `TerminalService`: multi-session PTY terminals, up to 10 user-visible sessions (`MaxSessions`; internal launcher sessions excluded) |
 | `pty_backend*.go` | PTY abstraction per platform: `creack/pty` (Unix), `charmbracelet/x/conpty` (Windows), plus a mock for tests |
 | `pty_env.go` | `buildPtyEnv` — supplies `TERM`/`COLORTERM`/`LANG` that launchd-started GUI apps don't inherit |
 | `shell_integration.go` | Materializes embedded `shell-integration/` scripts to `~/.cmdex`; activates OSC 133 markers via a per-session nonce |
@@ -175,6 +177,10 @@ Removed along the way — do not reintroduce references to them: `RunInTerminal`
 - Themes use CSS variables in `frontend/src/style.css` — modify variables, not hardcoded colors.
 - Terminal event names are per session (`pty-output:<id>`), so subscribe only once you have the session ID and clean up on close.
 - `AppSettings.ShellIntegration` changes apply to **newly started sessions only**, never to running ones.
+- Global shortcuts use Wails v3's `App.GlobalShortcut` manager. Registration is
+  applied after `ApplicationStarted`; Wails marshals platform operations and
+  invokes callbacks on their own goroutines.
+- The launcher's terminal is created via `CreateInternalSession`; internal sessions stay out of the main window's terminal tabs and active-session target.
 
 ## Tests
 

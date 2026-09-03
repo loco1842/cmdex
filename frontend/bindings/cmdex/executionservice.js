@@ -42,6 +42,23 @@ export function RunCommand(commandID, variables) {
     }));
 }
 
+/**
+ * RunCommandInSession is RunCommand targeted at an explicit terminal session
+ * rather than whichever session is active. The global quick launcher uses it
+ * so its output stays self-contained in its dedicated internal session. The
+ * ID-addressable behavior is deliberate: internal sessions are a UI
+ * visibility/lifecycle convenience, not an access-control boundary.
+ * @param {string} commandID
+ * @param {{ [_ in string]?: string }} variables
+ * @param {string} sessionID
+ * @returns {$CancellablePromise<$models.ExecutionRecord>}
+ */
+export function RunCommandInSession(commandID, variables, sessionID) {
+    return $Call.ByID(3885689246, commandID, variables, sessionID).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType2($result);
+    }));
+}
+
 // Private type creation functions
 const $$createType0 = $models.VariablePrompt.createFrom;
 const $$createType1 = $Create.Array($$createType0);

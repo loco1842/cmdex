@@ -133,6 +133,32 @@ export class AppSettings {
              */
             this["shellIntegration"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Global quick launcher. The *bool fields use nil = "leave unchanged" so a
+             * partial SetSettings payload cannot silently switch a flag off.
+             * register the system-wide shortcut
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["launcherEnabled"] = undefined;
+        }
+        if (!("launcherShortcut" in $$source)) {
+            /**
+             * accelerator, e.g. "CmdOrCtrl+Shift+K"
+             * @member
+             * @type {string}
+             */
+            this["launcherShortcut"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * start Cmdex in the background at login
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["launchAtLogin"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -386,6 +412,22 @@ export class EventNames {
              */
             this["dataReset"] = "";
         }
+        if (!("launcherShown" in $$source)) {
+            /**
+             * LauncherShown fires each time the quick launcher is revealed, so its UI
+             * can refocus the search field and select any existing query text.
+             * @member
+             * @type {string}
+             */
+            this["launcherShown"] = "";
+        }
+        if (!("launcherHidden" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["launcherHidden"] = "";
+        }
 
         Object.assign(this, $$source);
     }
@@ -485,6 +527,90 @@ export class ExecutionRecord {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ExecutionRecord(/** @type {Partial<ExecutionRecord>} */($$parsedSource));
+    }
+}
+
+/**
+ * LauncherStatus describes the state of the global shortcut for the settings UI.
+ */
+export class LauncherStatus {
+    /**
+     * Creates a new LauncherStatus instance.
+     * @param {Partial<LauncherStatus>} [$$source = {}] - The source object to create the LauncherStatus.
+     */
+    constructor($$source = {}) {
+        if (!("supported" in $$source)) {
+            /**
+             * Supported is false when Wails cannot provide global shortcuts on this
+             * platform/build. Registration failures are surfaced separately in Error.
+             * @member
+             * @type {boolean}
+             */
+            this["supported"] = false;
+        }
+        if (!("enabled" in $$source)) {
+            /**
+             * Enabled mirrors the user's setting, regardless of registration success.
+             * @member
+             * @type {boolean}
+             */
+            this["enabled"] = false;
+        }
+        if (!("registered" in $$source)) {
+            /**
+             * Registered is true only when the OS actually granted the shortcut.
+             * @member
+             * @type {boolean}
+             */
+            this["registered"] = false;
+        }
+        if (!("shortcut" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["shortcut"] = "";
+        }
+        if (!("error" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["error"] = "";
+        }
+        if (!("warning" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["warning"] = "";
+        }
+        if (!("launchAtLogin" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["launchAtLogin"] = false;
+        }
+        if (!("platform" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["platform"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LauncherStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {LauncherStatus}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LauncherStatus(/** @type {Partial<LauncherStatus>} */($$parsedSource));
     }
 }
 

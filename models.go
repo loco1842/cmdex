@@ -166,4 +166,10 @@ type AppSettings struct {
 	// scraping the xterm buffer. nil = unset, defaults to enabled; a change
 	// takes effect for sessions started after the change, not existing ones.
 	ShellIntegration *bool `json:"shellIntegration,omitempty"`
+
+	// Global quick launcher. The *bool fields use nil = "leave unchanged" so a
+	// partial SetSettings payload cannot silently switch a flag off.
+	LauncherEnabled  *bool  `json:"launcherEnabled,omitempty"` // register the system-wide shortcut
+	LauncherShortcut string `json:"launcherShortcut"`          // accelerator, e.g. "CmdOrCtrl+Shift+K"
+	LaunchAtLogin    *bool  `json:"launchAtLogin,omitempty"`   // start Cmdex in the background at login
 }

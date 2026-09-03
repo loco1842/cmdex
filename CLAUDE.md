@@ -51,7 +51,7 @@ cd frontend && pnpm install
 
 ### Wails Bindings (Go ↔ Frontend)
 
-Seven services are registered as `application.Service` in `main.go` — not a single monolithic `App` struct. Wails auto-generates TypeScript bindings per service under `frontend/bindings/cmdex/<servicename>.js` (**not** `frontend/wailsjs/`, which doesn't exist in this v3 project). To add a backend feature:
+Eight services are registered as `application.Service` in `main.go` — not a single monolithic `App` struct. Wails auto-generates TypeScript bindings per service under `frontend/bindings/cmdex/<servicename>.js` (**not** `frontend/wailsjs/`, which doesn't exist in this v3 project). To add a backend feature:
 
 1. Add a method to the relevant service struct (or create a new service and register it in `main.go`'s `Services` slice)
 2. Run `wails3 generate bindings` (or `wails3 dev`, which regenerates automatically)
@@ -63,7 +63,7 @@ Seven services are registered as `application.Service` in `main.go` — not a si
 
 | File | Responsibility |
 | --- | --- |
-| `main.go` | Entry point: `application.New(...)`, registration of all 7 services, native menu, main window config |
+| `main.go` | Entry point: `application.New(...)`, registration of all 8 services, native menu, main window config |
 | `app.go` | `App` service: lifecycle (`ServiceStartup`/`ServiceShutdown`), settings-window management, `GetOS`, `PickDirectory`; owns the package-level `db`/`executor`/`terminalSvc`/`wailsApp` vars other services read |
 | `command_service.go` | `CommandService`: CRUD for categories/commands/presets, reordering, FTS search, `ResetAllData` |
 | `execution_service.go` | `ExecutionService`: `GetVariables` (CEL defaults), `RunCommand`, working-directory resolution |
@@ -71,6 +71,7 @@ Seven services are registered as `application.Service` in `main.go` — not a si
 | `importexport_service.go` | `ImportExportService`: `ExportCommands`/`ImportCommands`, `SaveThemeTemplate` |
 | `event_service.go` | `EventService`: `GetEventNames` — exposes the `EventNames` constants so the frontend never hardcodes event strings |
 | `terminal_service.go` | `TerminalService`: multi-session PTY terminals (create/close/rename/activate, write, resize, clear, start/stop). `MaxSessions = 10` |
+| `launcher_service.go` | `LauncherService`: global launcher window, shortcut registration, launch-at-login, and its one persistent internal terminal session (eagerly started after `TerminalService`) |
 | `pty_backend.go`, `pty_backend_unix.go`, `pty_backend_windows.go`, `pty_backend_mock.go` | PTY abstraction (`ptyHandle`/`ptyProcess`) per platform: `creack/pty` on Unix, `charmbracelet/x/conpty` on Windows, plus a mock backend for tests |
 | `pty_env.go` | `buildPtyEnv`: supplies `TERM`/`COLORTERM`/`LANG` etc. that launchd-started GUI apps don't inherit, and merges shell-integration env |
 | `shell_integration.go` | Materializes the embedded `shell-integration/` scripts to `~/.cmdex` and activates OSC 133 markers in the session shell via a per-session nonce |

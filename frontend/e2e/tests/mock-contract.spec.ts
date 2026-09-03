@@ -31,13 +31,18 @@ function extractBindingIds(): Map<number, string> {
 
 function extractMockIds(): Map<number, string> {
   const src = fs.readFileSync(runtimePath, 'utf8');
-  const tableMatch = src.match(/const METHOD_IDS = \{([\s\S]*?)\} as const;/);
-  if (!tableMatch) throw new Error('Could not find METHOD_IDS table in runtime.ts');
   const ids = new Map<number, string>();
-  const re = /(\w+):\s*(\d+),/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tableMatch[1]))) {
-    ids.set(Number(m[2]), m[1]);
+  const tables = /const (?:METHOD_IDS|LAUNCHER_METHOD_IDS) = \{([\s\S]*?)\} as const;/g;
+  let tableMatch: RegExpExecArray | null;
+  while ((tableMatch = tables.exec(src))) {
+    const re = /(\w+):\s*(\d+),/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(tableMatch[1]))) {
+      ids.set(Number(m[2]), m[1]);
+    }
+  }
+  if (ids.size === 0) {
+    throw new Error('Could not find method ID tables in runtime.ts');
   }
   return ids;
 }

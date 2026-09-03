@@ -2,6 +2,8 @@ package main
 
 import (
 	"embed"
+	"os"
+	"slices"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -9,6 +11,9 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// mainWindowName identifies the primary window so other services can find it.
+const mainWindowName = "main"
 
 const (
 	mainWindowWidth                            = 1200
@@ -20,6 +25,7 @@ const (
 
 func main() {
 	appService := &App{}
+	startHidden := slices.Contains(os.Args[1:], backgroundFlag)
 
 	app := application.New(application.Options{
 		Name: "CmDex",
@@ -31,6 +37,7 @@ func main() {
 			application.NewService(&SettingsService{}),
 			application.NewService(&ImportExportService{}),
 			application.NewService(&EventService{}),
+			application.NewService(&LauncherService{}),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(assets),
@@ -72,10 +79,12 @@ func main() {
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:              "CmDex",
+		Name:               mainWindowName,
 		Width:              mainWindowWidth,
 		Height:             mainWindowHeight,
 		MinWidth:           mainWindowMinWidth,
 		MinHeight:          mainWindowMinHeight,
+		Hidden:             startHidden,
 		UseApplicationMenu: true,
 		BackgroundColour:   application.NewRGBA(windowBgR, windowBgG, windowBgB, windowBgA),
 	})

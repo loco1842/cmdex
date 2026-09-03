@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -108,6 +109,43 @@ func (s *ExecutionService) hasExplicitWorkingDir(cmd Command) bool {
 	return false
 }
 
+// resolveScript applies the same default and required-variable rules to every
+// execution entry point. A caller may omit a variable when its definition has
+// a literal or CEL default; variables with no usable value are rejected before
+// anything is written to a PTY. Definitions that are not referenced by the
+// script are intentionally ignored, since manual variable lists may contain
+// metadata for a command's other scripts or future edits.
+func (s *ExecutionService) resolveScript(cmd Command, variables map[string]string) (string, error) {
+	resolved := make(map[string]string, len(cmd.Variables)+len(variables))
+	eval := executor
+	if eval == nil {
+		eval = NewExecutor()
+	}
+	maps.Copy(resolved, eval.EvalDefaults(cmd.Variables))
+	maps.Copy(resolved, variables)
+	usedVariables := make(map[string]struct{})
+	for _, name := range ExtractTemplateVars(cmd.ScriptContent) {
+		usedVariables[name] = struct{}{}
+	}
+	for _, definition := range cmd.Variables {
+		if _, used := usedVariables[definition.Name]; !used {
+			continue
+		}
+		// An explicitly configured default makes the variable optional even
+		// when evaluating that default produces an empty string (for example,
+		// env("UNSET_NAME")). An empty default field is the legacy marker for
+		// a required variable, which preserves validation for definitions that
+		// have no fallback at all.
+		if strings.TrimSpace(definition.Default) == "" && strings.TrimSpace(resolved[definition.Name]) == "" {
+			return "", fmt.Errorf("missing required variable: %s", definition.Name)
+		}
+	}
+
+	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, resolved)
+	resolvedScript = stripShebang(resolvedScript)
+	return strings.TrimRight(resolvedScript, "\n"), nil
+}
+
 // RunCommand resolves the command's template variables and writes the
 // resulting command line directly to the active terminal session's PTY
 // via TerminalService.Write. Output streams back through the session's
@@ -123,9 +161,10 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 		}
 	}
 
-	resolvedScript := ReplaceTemplateVars(cmd.ScriptContent, variables)
-	resolvedScript = stripShebang(resolvedScript)
-	resolvedScript = strings.TrimRight(resolvedScript, "\n")
+	resolvedScript, err := s.resolveScript(cmd, variables)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
 
 	if terminalSvc == nil {
 		return ExecutionRecord{
@@ -169,6 +208,67 @@ func (s *ExecutionService) RunCommand(commandID string, variables map[string]str
 			Error:    err.Error(),
 			ExitCode: -1,
 		}
+	}
+
+	return ExecutionRecord{
+		ID:         uuid.New().String(),
+		CommandID:  commandID,
+		FinalCmd:   cmdLine,
+		ExecutedAt: time.Now(),
+	}
+}
+
+// RunCommandInSession is RunCommand targeted at an explicit terminal session
+// rather than whichever session is active. The global quick launcher uses it
+// so its output stays self-contained in its dedicated internal session. The
+// ID-addressable behavior is deliberate: internal sessions are a UI
+// visibility/lifecycle convenience, not an access-control boundary.
+func (s *ExecutionService) RunCommandInSession(
+	commandID string,
+	variables map[string]string,
+	sessionID string,
+) ExecutionRecord {
+	if terminalSvc == nil {
+		return ExecutionRecord{
+			ID:        uuid.New().String(),
+			CommandID: commandID,
+			Error:     "terminal service not initialized",
+			ExitCode:  -1,
+		}
+	}
+	if sessionID == "" {
+		return ExecutionRecord{
+			ID:        uuid.New().String(),
+			CommandID: commandID,
+			Error:     "no terminal session specified",
+			ExitCode:  -1,
+		}
+	}
+
+	cmd, err := db.GetCommand(commandID)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
+	ss, err := terminalSvc.resolveSession(sessionID)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
+
+	resolvedScript, err := s.resolveScript(cmd, variables)
+	if err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
+	}
+	shellPath := ss.info().ShellPath
+	if shellPath == "" {
+		shellPath, _ = detectShell()
+	}
+	workingDir := ""
+	if s.hasExplicitWorkingDir(cmd) {
+		workingDir = s.resolveWorkingDir(cmd)
+	}
+	cmdLine := buildCommandLine(shellPath, resolvedScript, workingDir)
+	if err := terminalSvc.Write(sessionID, cmdLine); err != nil {
+		return ExecutionRecord{ID: uuid.New().String(), CommandID: commandID, Error: err.Error(), ExitCode: -1}
 	}
 
 	return ExecutionRecord{

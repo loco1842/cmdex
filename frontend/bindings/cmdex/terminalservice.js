@@ -51,6 +51,19 @@ export function CloseSession(id) {
 }
 
 /**
+ * CreateInternalSession creates a session owned by app chrome rather than by
+ * the user's terminal tabs. It is hidden from ListSessions and never becomes
+ * the active session.
+ * @param {string} name
+ * @returns {$CancellablePromise<$models.SessionInfo | null>}
+ */
+export function CreateInternalSession(name) {
+    return $Call.ByID(98262348, name).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
+    }));
+}
+
+/**
  * CreateSession creates a new terminal session with a UUID v4 ID and default name "Terminal N".
  * @returns {$CancellablePromise<$models.SessionInfo | null>}
  */
@@ -146,7 +159,9 @@ export function Stop(sessionId) {
 }
 
 /**
- * Write sends input data to the specified session's PTY.
+ * Write sends input data to the specified session's PTY. Session IDs are
+ * intentionally addressable regardless of the internal flag: internal status
+ * controls UI visibility/lifecycle only, not access control.
  * @param {string} sessionId
  * @param {string} data
  * @returns {$CancellablePromise<void>}

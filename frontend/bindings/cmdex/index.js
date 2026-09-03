@@ -7,6 +7,7 @@ import * as CommandService from "./commandservice.js";
 import * as EventService from "./eventservice.js";
 import * as ExecutionService from "./executionservice.js";
 import * as ImportExportService from "./importexportservice.js";
+import * as LauncherService from "./launcherservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as TerminalService from "./terminalservice.js";
 export {
@@ -15,6 +16,7 @@ export {
     EventService,
     ExecutionService,
     ImportExportService,
+    LauncherService,
     SettingsService,
     TerminalService
 };
@@ -25,6 +27,7 @@ export {
     Command,
     EventNames,
     ExecutionRecord,
+    LauncherStatus,
     SessionInfo,
     TerminalLastOutput,
     VariableDefinition,

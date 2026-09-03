@@ -2,24 +2,72 @@ import React, { useState, useEffect, useCallback, useRef, lazy } from 'react'
 import {createRoot} from 'react-dom/client'
 import './i18n'
 import './style.css'
+import Launcher from './components/Launcher'
 import { GetSettings, SetSettings } from '../bindings/cmdex/settingsservice'
 import { ResetAllData } from '../bindings/cmdex/commandservice'
 import { THEMES, type CustomTheme } from './types'
 import { Events } from '@wailsio/runtime'
 import { eventNames } from './wails/events'
 import { toast } from 'sonner'
-import { applyTheme, applyDensity, applyFonts } from './lib/theme-apply'
+import { applyTheme, applyDensity, applyFonts, parseCustomThemes, resolveActiveCustomTheme } from './lib/theme-apply'
 
 const App = lazy(() => import('./App'))
 const SettingsPage = lazy(() => import('./components/SettingsPage'))
 
 const container = document.getElementById('root')
 
-const isSettingsWindow = new URLSearchParams(window.location.search).get('window') === 'settings'
+const windowKind = new URLSearchParams(window.location.search).get('window')
+const isSettingsWindow = windowKind === 'settings'
+const isLauncherWindow = windowKind === 'launcher'
 
 const root = createRoot(container!)
 
-if (isSettingsWindow) {
+if (isLauncherWindow) {
+    // The global quick launcher window. It only needs theming applied — all of
+    // its behaviour lives in <Launcher />, which stays mounted for the lifetime
+    // of the app because the Go side shows/hides the window rather than
+    // creating and destroying it.
+    function LauncherWindow() {
+        const [theme, setTheme] = useState('vscode-dark')
+        const settingsGenerationRef = useRef(0)
+
+        const applySettings = useCallback((s: Awaited<ReturnType<typeof GetSettings>> | null) => {
+            if (!s) return
+            const t = s.theme || 'vscode-dark'
+            const custom = resolveActiveCustomTheme(s.customThemes, t)
+            setTheme(t)
+            applyTheme(t, custom?.colors)
+            applyDensity(s.density || 'comfortable')
+            applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
+        }, [])
+
+        useEffect(() => {
+            const generation = ++settingsGenerationRef.current
+            GetSettings().then(settings => {
+                if (generation === settingsGenerationRef.current) applySettings(settings)
+            }).catch(() => {})
+        }, [applySettings])
+
+        // Stay in sync when preferences change in the settings window.
+        useEffect(() => {
+            const cleanup = Events.On(eventNames.settingsChanged, () => {
+                const generation = ++settingsGenerationRef.current
+                GetSettings().then(settings => {
+                    if (generation === settingsGenerationRef.current) applySettings(settings)
+                }).catch(() => {})
+            })
+            return () => cleanup()
+        }, [applySettings])
+
+        return <Launcher theme={theme} />
+    }
+
+    root.render(
+        <React.StrictMode>
+            <LauncherWindow />
+        </React.StrictMode>
+    )
+} else if (isSettingsWindow) {
     function SettingsWindow() {
         const [theme, setTheme] = useState('vscode-dark')
         const [density, setDensity] = useState('comfortable')
@@ -57,18 +105,13 @@ if (isSettingsWindow) {
                 if (s.windowY !== undefined) setWindowY(s.windowY)
                 if (s.windowWidth !== undefined) setWindowWidth(s.windowWidth)
                 if (s.windowHeight !== undefined) setWindowHeight(s.windowHeight)
-                // Parse custom themes before the first applyTheme so a saved custom
-                // theme paints with its own colors instead of the default palette.
-                let loadedCustomThemes: CustomTheme[] = []
-                if (s.customThemes && s.customThemes !== '[]') {
-                    try {
-                        const parsed = JSON.parse(s.customThemes)
-                        loadedCustomThemes = Array.isArray(parsed) ? parsed : []
-                        syncCustomThemes(loadedCustomThemes)
-                    } catch { /* ignore parse error */ }
-                }
-                const loadedCustom = loadedCustomThemes.find(c => c.id === t)
-                applyTheme(t, loadedCustom?.colors ?? null)
+                const parsed = parseCustomThemes(s.customThemes)
+                // Synchronize the empty list too: a settings refresh must not
+                // leave themes from an earlier state visible after they were
+                // removed or reset elsewhere.
+                syncCustomThemes(parsed)
+                const loadedCustom = parsed.find(c => c.id === t)
+                applyTheme(t, loadedCustom?.colors)
                 applyDensity(s.density || 'comfortable')
                 applyFonts(s.uiFont || 'Inter', s.monoFont || 'JetBrains Mono')
             }).catch(() => {})
@@ -88,7 +131,7 @@ if (isSettingsWindow) {
             const builtIn = THEMES.find(t => t.id === newTheme)
             const custom = customThemesRef.current.find(t => t.id === newTheme)
             const themeType = builtIn?.type ?? custom?.type ?? 'dark'
-            applyTheme(newTheme, custom?.colors ?? null)
+            applyTheme(newTheme, custom?.colors)
             if (themeType === 'dark') {
                 setLastDarkTheme(newTheme)
                 document.documentElement.style.setProperty('--cmdex-last-dark-theme', newTheme)
@@ -163,7 +206,7 @@ if (isSettingsWindow) {
             setLastDarkTheme(s?.lastDarkTheme || 'vscode-dark')
             setLastLightTheme(s?.lastLightTheme || 'vscode-light')
             syncCustomThemes([])
-            applyTheme(t, null)
+            applyTheme(t)
             applyDensity(s?.density || 'comfortable')
             applyFonts(s?.uiFont || 'Inter', s?.monoFont || 'JetBrains Mono')
             // The main window is holding stale commands/categories *and*
