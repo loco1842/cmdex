@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 export const eventNames = {
     openSettings: 'open-settings',
     openShortcuts: 'open-shortcuts',
+    openAbout: 'open-about',
     settingsChanged: 'settings-changed',
     settingsWindowClosing: 'settings-window-closing',
     dataReset: 'data-reset',

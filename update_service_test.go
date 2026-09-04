@@ -117,3 +117,92 @@ func TestAutoUpdateCheckSettingsRoundTrip(t *testing.T) {
 		t.Errorf("AutoUpdateCheck after partial write = %v, want non-nil true", settings.AutoUpdateCheck)
 	}
 }
+
+func TestBetaChannelSettingsRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	if err := db.runMigrations(); err != nil {
+		t.Fatalf("runMigrations failed: %v", err)
+	}
+
+	settings, err := db.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings failed: %v", err)
+	}
+	if settings.BetaChannel == nil || *settings.BetaChannel {
+		t.Errorf("default BetaChannel = %v, want non-nil false", settings.BetaChannel)
+	}
+	if settings.LastUpdateCheck != nil {
+		t.Errorf("default LastUpdateCheck = %v, want nil", *settings.LastUpdateCheck)
+	}
+
+	enabled := true
+	if err := db.SetSettings(AppSettings{BetaChannel: &enabled}); err != nil {
+		t.Fatalf("SetSettings failed: %v", err)
+	}
+	stamp := "2026-09-04T12:00:00Z"
+	if err := db.SetSettings(AppSettings{LastUpdateCheck: &stamp}); err != nil {
+		t.Fatalf("SetSettings failed: %v", err)
+	}
+	// A partial write for an unrelated field must not clobber either value.
+	if err := db.SetSettings(AppSettings{Locale: "en"}); err != nil {
+		t.Fatalf("SetSettings failed: %v", err)
+	}
+	settings, err = db.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings failed: %v", err)
+	}
+	if settings.BetaChannel == nil || !*settings.BetaChannel {
+		t.Errorf("BetaChannel after partial write = %v, want non-nil true", settings.BetaChannel)
+	}
+	if settings.LastUpdateCheck == nil || *settings.LastUpdateCheck != stamp {
+		t.Errorf("LastUpdateCheck after partial write = %v, want %q", settings.LastUpdateCheck, stamp)
+	}
+}
+
+func TestChannelProviderSetBeta(t *testing.T) {
+	p, err := newChannelProvider(false)
+	if err != nil {
+		t.Fatalf("newChannelProvider failed: %v", err)
+	}
+	if p.Name() != "github" {
+		t.Errorf("Name() = %q, want github", p.Name())
+	}
+	if p.current() == nil {
+		t.Fatal("inner provider is nil after construction")
+	}
+	first := p.current()
+	if err := p.setBeta(true); err != nil {
+		t.Fatalf("setBeta(true) failed: %v", err)
+	}
+	if p.current() == first {
+		t.Error("setBeta(true) did not rebuild the inner provider")
+	}
+	if err := p.setBeta(false); err != nil {
+		t.Fatalf("setBeta(false) failed: %v", err)
+	}
+	if p.current() == nil {
+		t.Error("inner provider is nil after setBeta(false)")
+	}
+}
+
+func TestGetAppInfoDevBuild(t *testing.T) {
+	oldVersion, oldDB := appVersion, db
+	defer func() { appVersion, db = oldVersion, oldDB }()
+
+	appVersion = "dev"
+	db = nil
+	info := (&UpdateService{}).GetAppInfo()
+	if info.UpdatesEnabled {
+		t.Error("UpdatesEnabled = true for dev build, want false")
+	}
+	if info.Version != "dev" {
+		t.Errorf("Version = %q, want dev", info.Version)
+	}
+	if info.Arch == "" {
+		t.Error("Arch is empty, want runtime.GOARCH")
+	}
+	if info.State != string(updater.StateUnconfigured) {
+		t.Errorf("State = %q, want unconfigured", info.State)
+	}
+}

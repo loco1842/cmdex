@@ -12,14 +12,30 @@
 // @ts-ignore: Unused imports
 import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
+
 /**
- * CheckForUpdates opens the update window and runs check + download/install.
- * It returns immediately; the window itself reflects progress, errors, and
- * the up-to-date state. Dev builds get an error instead of silent nothing.
+ * CheckForUpdates kicks off a headless check (+ auto-download when a release
+ * is found). It returns immediately; the About dialog renders progress from
+ * the wails:updater:* events. Dev builds get an error instead of silent
+ * nothing.
  * @returns {$CancellablePromise<void>}
  */
 export function CheckForUpdates() {
     return $Call.ByID(670986527);
+}
+
+/**
+ * GetAppInfo returns the About snapshot. Dev builds report updatesEnabled
+ * false with the unconfigured state; the dialog shows its dev-build copy.
+ * @returns {$CancellablePromise<$models.AppInfo>}
+ */
+export function GetAppInfo() {
+    return $Call.ByID(295420683).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
 }
 
 /**
@@ -50,6 +66,26 @@ export function GetUpdateState() {
 }
 
 /**
+ * RestartToUpdate restarts into the staged update after DownloadAndInstall
+ * reports ready. Returns an error when nothing is staged (ErrNotReady).
+ * @returns {$CancellablePromise<void>}
+ */
+export function RestartToUpdate() {
+    return $Call.ByID(861895759);
+}
+
+/**
+ * SetBetaChannel persists the prerelease toggle and rebuilds the provider so
+ * the next check walks /releases (beta on) or /releases/latest (beta off).
+ * It takes effect immediately, including for the running auto-check loop.
+ * @param {boolean} enabled
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetBetaChannel(enabled) {
+    return $Call.ByID(947562229, enabled);
+}
+
+/**
  * UpdatesEnabled reports whether the updater was configured. It is false for
  * local dev builds, where the update UI must stay hidden/disabled.
  * @returns {$CancellablePromise<boolean>}
@@ -57,3 +93,6 @@ export function GetUpdateState() {
 export function UpdatesEnabled() {
     return $Call.ByID(2359163331);
 }
+
+// Private type creation functions
+const $$createType0 = $models.AppInfo.createFrom;

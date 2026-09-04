@@ -60,7 +60,11 @@ func main() {
 	menu := app.NewMenu()
 
 	cmdexMenu := menu.AddSubmenu("CmDex")
-	cmdexMenu.AddRole(application.About)
+	// Custom About (not the role default): the in-app About dialog doubles as
+	// the update UI, mirroring GitHub Desktop.
+	cmdexMenu.Add("About CmDex").OnClick(func(ctx *application.Context) {
+		wailsApp.Event.Emit(eventNames.OpenAbout)
+	})
 	cmdexMenu.AddSeparator()
 	cmdexMenu.Add("Settings...").SetAccelerator("CmdOrCtrl+,").OnClick(func(ctx *application.Context) {
 		appService.ShowSettingsWindow()

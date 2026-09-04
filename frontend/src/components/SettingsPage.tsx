@@ -10,7 +10,6 @@ import LauncherSettings from './LauncherSettings';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Upload, Download, X, FolderOpen } from 'lucide-react';
 import { SetSettings, GetSettings } from '../../bindings/cmdex/settingsservice';
-import { CheckForUpdates, GetAppVersion, UpdatesEnabled } from '../../bindings/cmdex/updateservice';
 import { PickDirectory, GetOS } from '../../bindings/cmdex/app';
 import { SaveThemeTemplate } from '../../bindings/cmdex/importexportservice';
 import { THEMES, type OSKey, type CustomTheme } from '../types';
@@ -173,9 +172,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   const [currentOS, setCurrentOS] = useState<OSKey>('unknown');
   const [shellIntegration, setShellIntegrationState] = useState(true);
   const [autoUpdateCheck, setAutoUpdateCheckState] = useState(false);
-  const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [updatesEnabled, setUpdatesEnabled] = useState(false);
-  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
 
   // Refs track the latest values so the async GetSettings → merge → SetSettings
   // chain always reads the most recent state, avoiding stale-closure races when
@@ -272,17 +268,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     persistSettings({ autoUpdateCheck: v });
   }, [markTouched, persistSettings]);
 
-  const handleCheckForUpdates = useCallback(async () => {
-    setCheckingForUpdates(true);
-    try {
-      await CheckForUpdates();
-    } catch (err) {
-      toast.error(t('settings.checkFailed', { message: String(err) }));
-    } finally {
-      setCheckingForUpdates(false);
-    }
-  }, [t]);
-
   const changeWorkingDir = useCallback((v: string) => {
     markTouched();
     setDraftWorkingDir(v);
@@ -301,8 +286,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   }, [persistWorkingDir, draftWorkingDir]);
 
   useEffect(() => {
-    Promise.all([GetSettings(), GetOS(), GetAppVersion().catch(() => 'dev'), UpdatesEnabled().catch(() => false)])
-      .then(([s, os, version, enabled]) => {
+    Promise.all([GetSettings(), GetOS()])
+      .then(([s, os]) => {
         if (!s) return;
         if (userTouchedRef.current) return;
         setCurrentOS(normalizeOS(os));
@@ -320,8 +305,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         setDraftDensity(s.density || 'comfortable');
         setShellIntegrationState(s.shellIntegration ?? true);
         setAutoUpdateCheckState(s.autoUpdateCheck ?? false);
-        setAppVersion(version);
-        setUpdatesEnabled(enabled);
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -669,38 +652,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           <div className="border-t border-border pt-4 mt-2 space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
-                <Label>{t('settings.updates')}</Label>
+                <Label htmlFor="auto-update-check-toggle">{t('settings.autoUpdateCheck')}</Label>
                 <p className="text-[11px] text-muted-foreground">
-                  {updatesEnabled && appVersion
-                    ? t('settings.currentVersion', { version: appVersion })
-                    : t('settings.devVersion')}
+                  {t('settings.autoUpdateCheckHint')}
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!updatesEnabled || checkingForUpdates}
-                onClick={handleCheckForUpdates}
-              >
-                {checkingForUpdates ? t('settings.checkingForUpdates') : t('settings.checkForUpdates')}
-              </Button>
+              <Switch
+                id="auto-update-check-toggle"
+                checked={autoUpdateCheck}
+                onCheckedChange={changeAutoUpdateCheck}
+              />
             </div>
-            {updatesEnabled && (
-              <div className="flex items-center justify-between gap-4">
-                <div className="space-y-0.5">
-                  <Label htmlFor="auto-update-check-toggle">{t('settings.autoUpdateCheck')}</Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t('settings.autoUpdateCheckHint')}
-                  </p>
-                </div>
-                <Switch
-                  id="auto-update-check-toggle"
-                  checked={autoUpdateCheck}
-                  onCheckedChange={changeAutoUpdateCheck}
-                />
-              </div>
-            )}
           </div>
 
           {onResetAllData && (

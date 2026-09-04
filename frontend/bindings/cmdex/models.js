@@ -11,6 +11,81 @@ import { Create as $Create } from "@wailsio/runtime";
 import * as sql$0 from "../database/sql/models.js";
 
 /**
+ * AppInfo is the About dialog snapshot: identity, channel, and live state in
+ * one call so About renders instantly without waiting for events.
+ */
+export class AppInfo {
+    /**
+     * Creates a new AppInfo instance.
+     * @param {Partial<AppInfo>} [$$source = {}] - The source object to create the AppInfo.
+     */
+    constructor($$source = {}) {
+        if (!("version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["version"] = "";
+        }
+        if (!("arch" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["arch"] = "";
+        }
+        if (!("updatesEnabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["updatesEnabled"] = false;
+        }
+        if (!("betaChannel" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["betaChannel"] = false;
+        }
+        if (!("lastCheck" in $$source)) {
+            /**
+             * LastCheck is the last completed check, RFC3339 UTC; "" = never.
+             * @member
+             * @type {string}
+             */
+            this["lastCheck"] = "";
+        }
+        if (!("state" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["state"] = "";
+        }
+        if (!("pendingVersion" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["pendingVersion"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AppInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AppInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AppInfo(/** @type {Partial<AppInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * AppSettings stores user preferences
  */
 export class AppSettings {
@@ -167,6 +242,25 @@ export class AppSettings {
              * @type {boolean | null | undefined}
              */
             this["autoUpdateCheck"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * BetaChannel includes prerelease versions (e.g. v0.3.5-rc1) in update
+             * checks by querying /releases instead of /releases/latest. nil = unset,
+             * treated as stable-only.
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["betaChannel"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * LastUpdateCheck is when the last update check completed, RFC3339 UTC.
+             * Written backend-side by UpdateService; nil/"" = never checked.
+             * @member
+             * @type {string | null | undefined}
+             */
+            this["lastUpdateCheck"] = undefined;
         }
 
         Object.assign(this, $$source);
@@ -399,6 +493,13 @@ export class EventNames {
              * @type {string}
              */
             this["openShortcuts"] = "";
+        }
+        if (!("openAbout" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["openAbout"] = "";
         }
         if (!("settingsChanged" in $$source)) {
             /**

@@ -58,9 +58,12 @@ const METHOD_IDS = {
   ShowSettingsWindow: 2596981913,
   ResetAllData: 121210722,
   CheckForUpdates: 670986527,
+  GetAppInfo: 295420683,
   GetAppVersion: 1469023009,
   GetSkippedVersion: 1306757372,
   GetUpdateState: 4160282334,
+  RestartToUpdate: 861895759,
+  SetBetaChannel: 947562229,
   UpdatesEnabled: 2359163331,
 } as const;
 
@@ -198,7 +201,14 @@ let pickDirectoryResult = '/mock/path';
 // The mock models a dev build by default (GetAppVersion 'dev',
 // UpdatesEnabled false — update_service.go's updaterDisabled). A test can
 // flip to a configured release build via __cmdexE2E.setUpdateInfo.
-let updateInfo = { version: 'dev', enabled: false };
+let updateInfo = {
+  version: 'dev',
+  enabled: false,
+  beta: false,
+  lastCheck: '',
+  state: 'idle',
+  pendingVersion: '',
+};
 let lastOutputResult: { available: boolean; text: string; exitCode: number; truncated: boolean } = {
   available: false,
   text: '',
@@ -286,6 +296,14 @@ export const Events = {
   },
 };
 
+// Mirrors @wailsio/runtime's Browser.OpenURL (production opens the URL in
+// the system browser). Records URLs so tests can assert external links.
+const openedUrls: string[] = [];
+export const Browser = {
+  OpenURL(url: string) {
+    openedUrls.push(url);
+  },
+};
 export const Create = {
   Any(source: any) {
     return source;
@@ -750,11 +768,29 @@ const handlersByName: Record<MethodName, (...args: any[]) => any> = {
   ShowSettingsWindow: () => {},
 
   // ── Updater ──────────────────────────────────────────────
-  // Production CheckForUpdates returns immediately (the default updater
-  // window reflects progress itself) and only rejects for dev builds
-  // (update_service.go). The mock resolves, matching a configured build;
-  // a test can still failNext(CheckForUpdates) to exercise the error toast.
+  // Production CheckForUpdates is headless (returns immediately; the About
+  // dialog renders progress from the wails:updater:* events) and only
+  // rejects for dev builds (update_service.go). The mock resolves, matching
+  // a configured build; a test can still failNext(CheckForUpdates) to
+  // exercise the error status. Tests drive the About status line by emitting
+  // the wails:updater:* events via __cmdexE2E.emit.
   CheckForUpdates: () => {},
+
+  GetAppInfo: () => ({
+    version: updateInfo.version,
+    arch: 'arm64',
+    updatesEnabled: updateInfo.enabled,
+    betaChannel: updateInfo.beta,
+    lastCheck: updateInfo.lastCheck,
+    state: updateInfo.enabled ? updateInfo.state : 'unconfigured',
+    pendingVersion: updateInfo.pendingVersion,
+  }),
+
+  SetBetaChannel: (enabled: boolean) => {
+    updateInfo.beta = enabled;
+  },
+
+  RestartToUpdate: () => {},
 
   GetAppVersion: () => updateInfo.version,
 
@@ -826,7 +862,8 @@ export class CancellablePromise<T> extends Promise<T> {
     callLog.length = 0;
     pendingImportResult = null;
     pickDirectoryResult = '/mock/path';
-    updateInfo = { version: 'dev', enabled: false };
+    updateInfo = { version: 'dev', enabled: false, beta: false, lastCheck: '', state: 'idle', pendingVersion: '' };
+    openedUrls.length = 0;
     lastOutputResult = { available: false, text: '', exitCode: 0, truncated: false };
   },
   seed(data: {
@@ -835,7 +872,14 @@ export class CancellablePromise<T> extends Promise<T> {
     presets?: Record<string, any[]>;
     settings?: Record<string, any>;
     terminalSessions?: Array<{ id: string; name: string; running: boolean; shellPath: string; workingDir: string }>;
-    updateInfo?: { version: string; enabled: boolean };
+    updateInfo?: {
+      version: string;
+      enabled: boolean;
+      beta?: boolean;
+      lastCheck?: string;
+      state?: string;
+      pendingVersion?: string;
+    };
   }) {
     if (data.categories) categories = data.categories;
     if (data.commands) commands = data.commands;
@@ -845,7 +889,14 @@ export class CancellablePromise<T> extends Promise<T> {
     // for every field it does not mention — same as the init-script path below.
     if (data.settings) Object.assign(settings, data.settings);
     if (data.updateInfo?.version && typeof data.updateInfo?.enabled === 'boolean') {
-      updateInfo = { ...data.updateInfo };
+      updateInfo = {
+        version: data.updateInfo.version,
+        enabled: data.updateInfo.enabled,
+        beta: data.updateInfo.beta ?? false,
+        lastCheck: data.updateInfo.lastCheck ?? '',
+        state: data.updateInfo.state ?? 'idle',
+        pendingVersion: data.updateInfo.pendingVersion ?? '',
+      };
     }
     if (data.terminalSessions) {
       terminalSessions = data.terminalSessions;
@@ -897,6 +948,10 @@ export class CancellablePromise<T> extends Promise<T> {
   // Sticky rejection for every future call to `method` until cleared by
   // passing `null`.
   setFailure,
+  // URLs passed to Browser.OpenURL since the last reset.
+  get openedUrls() {
+    return openedUrls;
+  },
   // Every dispatched call in order, `{ method, args }` — read-only from the
   // test's perspective; use __cmdexE2E.reset() or clearCallLog() to reset it.
   callLog,
@@ -922,8 +977,22 @@ export class CancellablePromise<T> extends Promise<T> {
   },
   // Flip the mocked build between a dev build (default: updater disabled)
   // and a configured release build (update UI fully interactive).
-  setUpdateInfo(info: { version: string; enabled: boolean }) {
-    updateInfo = { ...info };
+  setUpdateInfo(info: {
+    version: string;
+    enabled: boolean;
+    beta?: boolean;
+    lastCheck?: string;
+    state?: string;
+    pendingVersion?: string;
+  }) {
+    updateInfo = {
+      version: info.version,
+      enabled: info.enabled,
+      beta: info.beta ?? false,
+      lastCheck: info.lastCheck ?? '',
+      state: info.state ?? 'idle',
+      pendingVersion: info.pendingVersion ?? '',
+    };
   },
   // Exercise LauncherService.Show/Hide/Toggle through the same name-based
   // dispatcher used by generated bindings, while exposing enough state to
@@ -949,7 +1018,14 @@ if (seed) {
   if (seed.commands) seedPresetsFromCommands(seed.commands);
   if (seed.settings) Object.assign(settings, seed.settings);
   if (seed.updateInfo?.version && typeof seed.updateInfo?.enabled === 'boolean') {
-    updateInfo = { version: seed.updateInfo.version, enabled: seed.updateInfo.enabled };
+    updateInfo = {
+      version: seed.updateInfo.version,
+      enabled: seed.updateInfo.enabled,
+      beta: seed.updateInfo.beta ?? false,
+      lastCheck: seed.updateInfo.lastCheck ?? '',
+      state: seed.updateInfo.state ?? 'idle',
+      pendingVersion: seed.updateInfo.pendingVersion ?? '',
+    };
   }
   if (seed.terminalSessions) {
     terminalSessions = seed.terminalSessions;

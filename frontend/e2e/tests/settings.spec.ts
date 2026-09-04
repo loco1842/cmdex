@@ -145,31 +145,22 @@ test.describe('Settings — General', () => {
       .toBe(true);
   });
 
-  test('Updates: dev builds show the dev state with a disabled check button', async ({ page, gotoSettings }) => {
+  test('Updates: settings keeps only the auto-check toggle (checking lives in About)', async ({
+    page,
+    gotoSettings,
+  }) => {
     await gotoSettings();
     await goToGeneralTab(page);
 
-    await expect(page.getByText('Development build — updates are unavailable')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Check for Updates' })).toBeDisabled();
-    await expect(page.locator('#auto-update-check-toggle')).toHaveCount(0);
+    // The version text and check button moved to the About dialog.
+    await expect(page.getByRole('button', { name: 'Check for Updates' })).toHaveCount(0);
+    await expect(page.locator('#auto-update-check-toggle')).toBeVisible();
   });
 
-  test('Updates: a configured build shows the version, checks, and persists the auto-check toggle', async ({
-    page,
-    seed,
-    gotoSettings,
-  }) => {
+  test('Updates: the auto-check toggle persists', async ({ page, seed, gotoSettings }) => {
     await seed({ updateInfo: { version: '0.4.0', enabled: true } });
     await gotoSettings();
     await goToGeneralTab(page);
-
-    await expect(page.getByText('Version 0.4.0')).toBeVisible();
-    const checkButton = page.getByRole('button', { name: 'Check for Updates' });
-    await expect(checkButton).toBeEnabled();
-    await checkButton.click();
-    await expect
-      .poll(() => page.evaluate(() => window.__cmdexE2E!.callLog.some((c) => c.method === 'CheckForUpdates')))
-      .toBe(true);
 
     await page.locator('#auto-update-check-toggle').click();
     await expect

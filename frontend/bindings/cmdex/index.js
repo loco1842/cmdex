@@ -24,6 +24,7 @@ export {
 };
 
 export {
+    AppInfo,
     AppSettings,
     Category,
     Command,

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -13,29 +16,9 @@ import (
 )
 
 // autoCheckInterval is how often the opt-in background update check runs.
-// The default updater window only surfaces when an update is actually found.
+// Checks are headless: a found update downloads in the background and waits
+// as "ready" in the About dialog, so ticks with no update stay fully silent.
 const autoCheckInterval = 12 * time.Hour
-
-// updaterWindowWidth/Height is the full content size of the updater window.
-const (
-	updaterWindowWidth  = 520
-	updaterWindowHeight = 540
-)
-
-// updaterThemeCSS layers Cmdex's dark palette over the updater's default
-// window so it doesn't flash the framework's light theme. Only the variables
-// the updater stylesheet exposes are overridden (see the Updater guide).
-const updaterThemeCSS = `:root {
-  --bg: #0f0f14;
-  --surface: #16161e;
-  --surface-2: #1e1e26;
-  --fg: #e8e8f0;
-  --fg-dim: #a0a0b0;
-  --fg-faint: #6b6b78;
-  --border: rgba(255, 255, 255, 0.1);
-  --accent: #7c6aef;
-  --accent-fg: #ffffff;
-}`
 
 // updaterDisabled reports whether the updater must stay unconfigured.
 // appVersion is only stamped on real builds (Taskfiles + release.yml pass
@@ -45,37 +28,94 @@ func updaterDisabled() bool {
 	return appVersion == "" || appVersion == "dev"
 }
 
-// initUpdater configures app.Updater with the GitHub Releases provider.
-// Must be called after application.New and before app.Run so the helper-mode
-// swap path (Restart re-execs into application.New) is armed.
-func initUpdater(app *application.App) {
-	if updaterDisabled() {
-		return
+// channelProvider wraps the GitHub provider so the beta-channel toggle takes
+// effect without re-running Updater.Init (the framework only allows Init
+// once). Flipping the toggle rebuilds the inner provider with the matching
+// Prerelease flag; in-flight checks keep the instance they started with.
+type channelProvider struct {
+	mu    sync.RWMutex
+	inner updater.Provider
+}
+
+func newChannelProvider(beta bool) (*channelProvider, error) {
+	p := &channelProvider{}
+	if err := p.setBeta(beta); err != nil {
+		return nil, err
 	}
+	return p, nil
+}
+
+func (p *channelProvider) Name() string { return "github" }
+
+func (p *channelProvider) current() updater.Provider {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.inner
+}
+
+func (p *channelProvider) Check(ctx context.Context, req updater.CheckRequest) (*updater.Release, error) {
+	return p.current().Check(ctx, req)
+}
+
+func (p *channelProvider) Download(
+	ctx context.Context,
+	r *updater.Release,
+	dst io.Writer,
+	onProgress func(written, total int64),
+) error {
+	return p.current().Download(ctx, r, dst, onProgress)
+}
+
+// setBeta rebuilds the inner provider: beta on walks /releases (prereleases
+// included, e.g. v0.3.5-rc1), beta off uses /releases/latest (stable only).
+func (p *channelProvider) setBeta(beta bool) error {
 	gh, err := github.New(github.Config{
 		Repository:    updaterGitHubRepo,
 		ChecksumAsset: "SHA256SUMS",
 		AssetMatcher:  matchUpdaterAsset,
+		Prerelease:    beta,
 	})
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.inner = gh
+	return nil
+}
+
+// updateChannelProvider is the single instance handed to Updater.Init;
+// SetBetaChannel swaps its inner provider when the toggle flips.
+var updateChannelProvider *channelProvider
+
+// updateCheckMu serializes manual and background checks: the framework drops
+// overlapping flows, so a trigger arriving while one is in flight is a no-op.
+var updateCheckMu sync.Mutex
+
+// pendingUpdateVersion tracks the release found by the last check so the
+// About dialog can name it. Guarded by updateCheckMu.
+var pendingUpdateVersion string
+
+// initUpdater configures app.Updater with the channel-aware GitHub provider.
+// No Window is configured: the in-app About dialog is the update UI and
+// renders progress from the wails:updater:* events. Must be called after
+// application.New and before app.Run so the helper-mode swap path (Restart
+// re-execs into application.New) is armed.
+func initUpdater(app *application.App) {
+	if updaterDisabled() {
+		return
+	}
+	// db isn't initialized yet at this point (services start on Run), so the
+	// provider starts stable-only; ServiceStartup syncs the saved toggle.
+	gh, err := newChannelProvider(false)
 	if err != nil {
 		app.Logger.Error("updater: github provider", "error", err)
 		return
 	}
+	updateChannelProvider = gh
 	if err := app.Updater.Init(updater.Config{
 		CurrentVersion: appVersion,
 		Providers:      []updater.Provider{gh},
-		Window: &updater.BuiltinWindow{
-			CSS: updaterThemeCSS,
-			// Open at the full content size up front. The framework default
-			// opens small (348x161) and grows to fit via WindowSizer, but the
-			// grow step doesn't fire for late-arriving states (e.g. the error
-			// panel), leaving content clipped.
-			Options: updater.WindowOptions{
-				Title:  "CmDex Updater",
-				Width:  updaterWindowWidth,
-				Height: updaterWindowHeight,
-			},
-		},
 	}); err != nil {
 		app.Logger.Error("updater: init", "error", err)
 	}
@@ -106,16 +146,23 @@ func matchUpdaterAsset(req updater.CheckRequest, assets []github.ReleaseAsset) i
 // opt-in periodic background check.
 type UpdateService struct{}
 
-// ServiceStartup starts the background auto-check loop. It only ever fires
-// when the user enabled it in Settings (default off) and this is a stamped
-// release build; ticks with no update stay silent (Window only opens when the
-// updater itself finds a release via CheckAndInstall).
+// ServiceStartup syncs the saved beta-channel toggle (db is ready now, unlike
+// at initUpdater time) and starts the background auto-check loop. It only
+// ever fires when the user enabled it in Settings (default off) and this is
+// a stamped release build.
 func (s *UpdateService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
-	go s.autoCheckLoop(context.WithoutCancel(ctx))
+	if !updaterDisabled() && updateChannelProvider != nil && db != nil {
+		if settings, err := db.GetSettings(); err == nil && settings.BetaChannel != nil {
+			if err := updateChannelProvider.setBeta(*settings.BetaChannel); err != nil {
+				fmt.Println("updater: apply beta channel error:", err)
+			}
+		}
+	}
+	go s.autoCheckLoop()
 	return nil
 }
 
-func (s *UpdateService) autoCheckLoop(ctx context.Context) {
+func (s *UpdateService) autoCheckLoop() {
 	ticker := time.NewTicker(autoCheckInterval)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -129,30 +176,65 @@ func (s *UpdateService) autoCheckLoop(ctx context.Context) {
 		if settings.AutoUpdateCheck == nil || !*settings.AutoUpdateCheck {
 			continue
 		}
-		if err := wailsApp.Updater.CheckAndInstall(ctx); err != nil {
-			fmt.Println("auto update check error:", err)
-		}
+		runUpdateCheck()
 	}
 }
 
-// checkForUpdatesFromMenu runs the update flow from the native menu, which
-// has no toast surface: dev builds (updater unconfigured) get a native
-// dialog instead of silent nothing, while configured builds open the
-// updater window asynchronously (it renders progress, errors, and the
-// up-to-date state itself).
-func checkForUpdatesFromMenu() {
+// runUpdateCheck performs one headless check and auto-downloads any release
+// found (GitHub Desktop behaviour); the About dialog renders progress from
+// the wails:updater:* events. The completion time is recorded for the
+// "last checked …" line. Overlapping triggers are dropped.
+func runUpdateCheck() {
 	if updaterDisabled() || wailsApp == nil {
-		wailsApp.Dialog.Info().
-			SetTitle("CmDex Updater").
-			SetMessage("Updates are not available in development builds. Release builds check GitHub releases for new versions.").
-			Show()
 		return
 	}
-	go func() {
-		if err := wailsApp.Updater.CheckAndInstall(context.Background()); err != nil {
-			wailsApp.Logger.Error("update check failed", "error", err)
-		}
-	}()
+	if !updateCheckMu.TryLock() {
+		return
+	}
+	defer updateCheckMu.Unlock()
+	pendingUpdateVersion = ""
+	rel, err := wailsApp.Updater.Check(context.Background())
+	recordUpdateCheckTime()
+	if err != nil {
+		wailsApp.Logger.Error("update check failed", "error", err)
+		return
+	}
+	if rel == nil {
+		return
+	}
+	pendingUpdateVersion = rel.Version
+	if err := wailsApp.Updater.DownloadAndInstall(context.Background()); err != nil {
+		wailsApp.Logger.Error("update download failed", "error", err)
+	}
+}
+
+// recordUpdateCheckTime stamps the completion time shown in About as
+// "last checked …". Failures are best-effort: a missed stamp just leaves the
+// previous value.
+func recordUpdateCheckTime() {
+	if db == nil {
+		return
+	}
+	settings, err := db.GetSettings()
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	settings.LastUpdateCheck = &now
+	if err := db.SetSettings(settings); err != nil {
+		fmt.Println("record update check time error:", err)
+	}
+}
+
+// checkForUpdatesFromMenu opens About (the update UI) and kicks off a check
+// whose progress About renders inline. Dev builds just open About, which
+// shows the dev-build state with the button disabled.
+func checkForUpdatesFromMenu() {
+	if wailsApp == nil {
+		return
+	}
+	wailsApp.Event.Emit(eventNames.OpenAbout)
+	go runUpdateCheck()
 }
 
 // GetAppVersion returns the build-time version, or "dev" for local builds.
@@ -166,18 +248,85 @@ func (s *UpdateService) UpdatesEnabled() bool {
 	return !updaterDisabled()
 }
 
-// CheckForUpdates opens the update window and runs check + download/install.
-// It returns immediately; the window itself reflects progress, errors, and
-// the up-to-date state. Dev builds get an error instead of silent nothing.
+// CheckForUpdates kicks off a headless check (+ auto-download when a release
+// is found). It returns immediately; the About dialog renders progress from
+// the wails:updater:* events. Dev builds get an error instead of silent
+// nothing.
 func (s *UpdateService) CheckForUpdates() error {
 	if updaterDisabled() || wailsApp == nil {
 		return errors.New("updates are not available in dev builds")
 	}
-	go func() {
-		if err := wailsApp.Updater.CheckAndInstall(context.Background()); err != nil {
-			fmt.Println("CheckForUpdates error:", err)
+	go runUpdateCheck()
+	return nil
+}
+
+// RestartToUpdate restarts into the staged update after DownloadAndInstall
+// reports ready. Returns an error when nothing is staged (ErrNotReady).
+func (s *UpdateService) RestartToUpdate() error {
+	if updaterDisabled() || wailsApp == nil {
+		return errors.New("updates are not available in dev builds")
+	}
+	return wailsApp.Updater.Restart(context.Background())
+}
+
+// AppInfo is the About dialog snapshot: identity, channel, and live state in
+// one call so About renders instantly without waiting for events.
+type AppInfo struct {
+	Version        string `json:"version"`
+	Arch           string `json:"arch"`
+	UpdatesEnabled bool   `json:"updatesEnabled"`
+	BetaChannel    bool   `json:"betaChannel"`
+	// LastCheck is the last completed check, RFC3339 UTC; "" = never.
+	LastCheck      string `json:"lastCheck"`
+	State          string `json:"state"`
+	PendingVersion string `json:"pendingVersion"`
+}
+
+// GetAppInfo returns the About snapshot. Dev builds report updatesEnabled
+// false with the unconfigured state; the dialog shows its dev-build copy.
+func (s *UpdateService) GetAppInfo() AppInfo {
+	info := AppInfo{Version: appVersion, Arch: runtime.GOARCH, State: string(updater.StateUnconfigured)}
+	if db != nil {
+		if settings, err := db.GetSettings(); err == nil {
+			if settings.BetaChannel != nil {
+				info.BetaChannel = *settings.BetaChannel
+			}
+			if settings.LastUpdateCheck != nil {
+				info.LastCheck = *settings.LastUpdateCheck
+			}
 		}
-	}()
+	}
+	if updaterDisabled() || wailsApp == nil {
+		return info
+	}
+	info.UpdatesEnabled = true
+	info.State = string(wailsApp.Updater.State())
+	updateCheckMu.Lock()
+	info.PendingVersion = pendingUpdateVersion
+	updateCheckMu.Unlock()
+	return info
+}
+
+// SetBetaChannel persists the prerelease toggle and rebuilds the provider so
+// the next check walks /releases (beta on) or /releases/latest (beta off).
+// It takes effect immediately, including for the running auto-check loop.
+func (s *UpdateService) SetBetaChannel(enabled bool) error {
+	if db == nil {
+		return errors.New("settings store unavailable")
+	}
+	settings, err := db.GetSettings()
+	if err != nil {
+		return err
+	}
+	settings.BetaChannel = &enabled
+	if err := db.SetSettings(settings); err != nil {
+		return err
+	}
+	if updateChannelProvider != nil {
+		if err := updateChannelProvider.setBeta(enabled); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
