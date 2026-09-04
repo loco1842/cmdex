@@ -285,7 +285,7 @@
     "checkFailed": "Couldn't check for updates: {{message}}",
     "betaHeading": "Looking for the latest features?",
     "betaToggle": "Include prerelease versions",
-    "betaHint": "Update checks will include beta releases (e.g. v0.3.5-rc1).",
+    "betaHint": "Update checks will include beta releases.",
     "license": "License and Open Source Notices",
     "viewOnGitHub": "View on GitHub",
     "close": "Close"
