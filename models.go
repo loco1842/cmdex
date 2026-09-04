@@ -172,4 +172,17 @@ type AppSettings struct {
 	LauncherEnabled  *bool  `json:"launcherEnabled,omitempty"` // register the system-wide shortcut
 	LauncherShortcut string `json:"launcherShortcut"`          // accelerator, e.g. "CmdOrCtrl+Shift+K"
 	LaunchAtLogin    *bool  `json:"launchAtLogin,omitempty"`   // start Cmdex in the background at login
+
+	// AutoUpdateCheck enables the opt-in periodic background update check
+	// (UpdateService, every 12h). nil = unset, treated as disabled.
+	AutoUpdateCheck *bool `json:"autoUpdateCheck,omitempty"`
+
+	// BetaChannel includes prerelease versions (e.g. v0.3.5-rc1) in update
+	// checks by querying /releases instead of /releases/latest. nil = unset,
+	// treated as stable-only.
+	BetaChannel *bool `json:"betaChannel,omitempty"`
+
+	// LastUpdateCheck is when the last update check completed, RFC3339 UTC.
+	// Written backend-side by UpdateService; nil/"" = never checked.
+	LastUpdateCheck *string `json:"lastUpdateCheck,omitempty"`
 }

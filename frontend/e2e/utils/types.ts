@@ -17,6 +17,16 @@ export interface CmdexE2ESeed {
     presets?: Record<string, Array<Record<string, unknown>>>;
     settings?: Record<string, unknown>;
     terminalSessions?: CmdexE2ETerminalSession[];
+    // Flip the mocked build between a dev build (default: updater disabled)
+    // and a configured release build (update UI fully interactive).
+    updateInfo?: {
+        version: string;
+        enabled: boolean;
+        beta?: boolean;
+        lastCheck?: string;
+        state?: string;
+        pendingVersion?: string;
+    };
 }
 
 // Keep in sync with the method names in e2e/mocks/runtime.ts's METHOD_IDS.
@@ -66,6 +76,14 @@ export type CmdexE2EMethodName =
     | 'PickDirectory'
     | 'ShowSettingsWindow'
     | 'ResetAllData'
+    | 'CheckForUpdates'
+    | 'GetAppInfo'
+    | 'GetAppVersion'
+    | 'GetSkippedVersion'
+    | 'GetUpdateState'
+    | 'RestartToUpdate'
+    | 'SetBetaChannel'
+    | 'UpdatesEnabled'
     | 'ApplySettings'
     | 'GetSessionID'
     | 'GetStatus'
@@ -110,6 +128,8 @@ declare global {
             // Every dispatched call in order, `{ method, args }`.
             callLog: Array<{ method: CmdexE2EMethodName; args: unknown[] }>;
             clearCallLog(): void;
+            // URLs passed to Browser.OpenURL since the last reset.
+            readonly openedUrls: string[];
             // Configure ImportCommands' next successful result (default:
             // null, i.e. the user cancelled the dialog).
             setImportResult(result: Array<Record<string, unknown>> | null): void;
@@ -120,6 +140,16 @@ declare global {
             // Configure the in-band launcher execution result used by launcher
             // search/output regression tests.
             setLauncherRunResult(result: Record<string, unknown> | null): void;
+            // Flip the mocked build between a dev build (default: updater
+            // disabled) and a configured release build (update UI interactive).
+            setUpdateInfo(info: {
+                version: string;
+                enabled: boolean;
+                beta?: boolean;
+                lastCheck?: string;
+                state?: string;
+                pendingVersion?: string;
+            }): void;
             invokeLauncher(method: 'Show' | 'Hide' | 'Toggle'): void;
             launcherVisible: boolean;
             launcherSessionId: string;

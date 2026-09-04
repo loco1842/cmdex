@@ -13,6 +13,7 @@ import TerminalTabBar from './components/TerminalTabBar';
 import CommandPalette from './components/CommandPalette';
 import WelcomeTab from './components/WelcomeTab';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
+import AboutDialog from './components/AboutDialog';
 import CommandDetailTab from './components/CommandDetailTab';
 import { useKeyboardShortcuts, cmdOrCtrl } from './hooks/useKeyboardShortcuts';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -136,6 +137,7 @@ function App() {
     const openTabsRef = useSyncedRef(openTabs);
 
     const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
+    const [aboutOpen, setAboutOpen] = useState(false);
     const scriptFetchGenRef = useRef<Record<string, number>>({});
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const activeTabIdRef = useSyncedRef(activeTabId);
@@ -683,6 +685,14 @@ function App() {
         if (!eventsInitialized) return;
         const cleanup = Events.On(eventNames.openShortcuts, () => {
             setShortcutsDialogOpen(true);
+        });
+        return cleanup;
+    }, [eventsInitialized]);
+
+    useEffect(() => {
+        if (!eventsInitialized) return;
+        const cleanup = Events.On(eventNames.openAbout, () => {
+            setAboutOpen(true);
         });
         return cleanup;
     }, [eventsInitialized]);
@@ -1919,6 +1929,7 @@ function App() {
                 />
                 <Toaster position="bottom-right" richColors closeButton duration={3000} />
                 <KeyboardShortcutsDialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen} />
+                <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
             </div>
         </TooltipProvider>
     );

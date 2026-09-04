@@ -38,6 +38,18 @@ tasks:
     cmds:
       - task: darwin:package:dmg:universal
 
+  updater-assets:
+    summary: Builds updater-compatible release assets for the target OS
+    desc: |
+      Produces the artifacts the in-app updater installs (issue #73): a
+      .zip of the .app on macOS, raw binaries elsewhere. Runs alongside the
+      human-facing packages, not instead of them. Pass
+      APP_VERSION=<version> so the stamped binary matches the release tag.
+    cmds:
+      - task: "{{.GOOS}}:updater-assets"
+        vars:
+          APP_VERSION: '{{.APP_VERSION | default "dev"}}'
+
   run:
     summary: Runs the application
     cmds:

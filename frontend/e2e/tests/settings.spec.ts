@@ -145,6 +145,35 @@ test.describe('Settings — General', () => {
       .toBe(true);
   });
 
+  test('Updates: settings keeps only the auto-check toggle (checking lives in About)', async ({
+    page,
+    gotoSettings,
+  }) => {
+    await gotoSettings();
+    await goToGeneralTab(page);
+
+    // The version text and check button moved to the About dialog.
+    await expect(page.getByRole('button', { name: 'Check for Updates' })).toHaveCount(0);
+    await expect(page.locator('#auto-update-check-toggle')).toBeVisible();
+  });
+
+  test('Updates: the auto-check toggle persists', async ({ page, seed, gotoSettings }) => {
+    await seed({ updateInfo: { version: '0.4.0', enabled: true } });
+    await gotoSettings();
+    await goToGeneralTab(page);
+
+    await page.locator('#auto-update-check-toggle').click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.__cmdexE2E!.callLog.some(
+            (c) => c.method === 'SetSettings' && (c.args[0] as string).includes('"autoUpdateCheck":true'),
+          ),
+        ),
+      )
+      .toBe(true);
+  });
+
   test('Danger Zone: the two-step confirm resets all data via ResetAllData', async ({ page, seed, gotoSettings }) => {
     await seed({ commands: [{
       id: 'cmd-to-wipe',

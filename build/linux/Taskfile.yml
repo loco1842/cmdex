@@ -59,7 +59,11 @@ tasks:
     cmds:
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o {{.OUTPUT}}'
     vars:
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
+      # APP_VERSION is stamped into the binary as main.appVersion (the updater's
+      # CurrentVersion). release.yml passes it from the git tag; local builds
+      # keep "dev", which leaves the updater unconfigured (see updaterDisabled).
+      APP_VERSION: '{{.APP_VERSION | default "dev"}}'
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -X main.appVersion={{.APP_VERSION}}"{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
     env:
@@ -108,6 +112,17 @@ tasks:
       - task: create:deb
       - task: create:rpm
       - task: create:aur
+
+  updater-assets:
+    summary: Creates the updater-compatible Linux asset (raw binary)
+    desc: |
+      Copies the built binary to an updater-addressable name for the in-app
+      updater (issue #73). The updater installs a single binary as-is, so no
+      archive is needed; runs alongside (not instead of) the AppImage/deb/rpm.
+    deps:
+      - task: build
+    cmds:
+      - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}-linux-{{.ARCH | default ARCH}}"
 
   create:appimage:
     summary: Creates an AppImage

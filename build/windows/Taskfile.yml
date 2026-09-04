@@ -57,7 +57,11 @@ tasks:
       - cmd: rm -f *.syso
         platforms: [linux, darwin]
     vars:
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{end}}'
+      # APP_VERSION is stamped into the binary as main.appVersion (the updater's
+      # CurrentVersion). release.yml passes it from the git tag; local builds
+      # keep "dev", which leaves the updater unconfigured (see updaterDisabled).
+      APP_VERSION: '{{.APP_VERSION | default "dev"}}'
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui -X main.appVersion={{.APP_VERSION}}"{{end}}'
     env:
       GOOS: windows
       CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
@@ -103,6 +107,20 @@ tasks:
     vars:
       FORMAT: '{{.FORMAT | default "nsis"}}'
       INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+
+  updater-assets:
+    summary: Creates the updater-compatible Windows asset (raw .exe)
+    desc: |
+      Copies the built .exe to an updater-addressable name for the in-app
+      updater (issue #73). The updater installs a single binary as-is, so no
+      archive is needed; runs alongside (not instead of) the NSIS installer.
+    deps:
+      - task: build
+    cmds:
+      - cmd: powershell Copy-Item "{{.BIN_DIR}}/{{.APP_NAME}}.exe" "{{.BIN_DIR}}/{{.APP_NAME}}-windows-{{.ARCH | default ARCH}}.exe" -Force
+        platforms: [windows]
+      - cmd: cp "{{.BIN_DIR}}/{{.APP_NAME}}.exe" "{{.BIN_DIR}}/{{.APP_NAME}}-windows-{{.ARCH | default ARCH}}.exe"
+        platforms: [linux, darwin]
 
   generate:syso:
     summary: Generates Windows `.syso` file

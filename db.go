@@ -1318,6 +1318,13 @@ func (db *DB) GetSettings() (AppSettings, error) {
 	launcherEnabled, launchAtLogin := false, false
 	defaults.LauncherEnabled = &launcherEnabled
 	defaults.LaunchAtLogin = &launchAtLogin
+	// Background update checks are opt-in too.
+	autoUpdateCheck := false
+	defaults.AutoUpdateCheck = &autoUpdateCheck
+	// Stable-only update channel by default; LastUpdateCheck stays nil until
+	// the first check completes (older rows simply lack both keys).
+	betaChannel := false
+	defaults.BetaChannel = &betaChannel
 	x, y, w, h := -1, -1, 640, 520
 	defaults.WindowX = &x
 	defaults.WindowY = &y
@@ -1388,6 +1395,15 @@ func (db *DB) SetSettings(s AppSettings) error {
 	}
 	if s.LaunchAtLogin != nil {
 		existing.LaunchAtLogin = s.LaunchAtLogin
+	}
+	if s.AutoUpdateCheck != nil {
+		existing.AutoUpdateCheck = s.AutoUpdateCheck
+	}
+	if s.BetaChannel != nil {
+		existing.BetaChannel = s.BetaChannel
+	}
+	if s.LastUpdateCheck != nil {
+		existing.LastUpdateCheck = s.LastUpdateCheck
 	}
 	if s.WindowX != nil {
 		existing.WindowX = s.WindowX
