@@ -8,7 +8,9 @@ export function formatRelativeTime(iso: string | undefined | null, now: number =
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const diffMs = now - then;
-  if (diffMs < 0) return "";
+  // Future stamps come from clock skew on LastUpdateCheck; clamping to
+  // "just now" beats rendering them as "never checked".
+  if (diffMs < 0) return "just now";
   const minute = 60 * 1000;
   const hour = 60 * minute;
   const day = 24 * hour;

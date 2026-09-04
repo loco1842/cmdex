@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
@@ -62,6 +61,30 @@ func TestMatchUpdaterAssetNoMatch(t *testing.T) {
 	}
 }
 
+func TestMatchUpdaterAssetPrefersExactArchOverUniversal(t *testing.T) {
+	universalFirst := []github.ReleaseAsset{
+		{Name: "cmdex-darwin-universal.zip"},
+		{Name: "cmdex-darwin-arm64.zip"},
+	}
+	got := matchUpdaterAsset(updater.CheckRequest{Platform: "darwin", Arch: "arm64"}, universalFirst)
+	if got != 1 || universalFirst[got].Name != "cmdex-darwin-arm64.zip" {
+		name := "<no match>"
+		if got >= 0 {
+			name = universalFirst[got].Name
+		}
+		t.Errorf("universal-first match = %s, want cmdex-darwin-arm64.zip", name)
+	}
+
+	archFirst := []github.ReleaseAsset{
+		{Name: "cmdex-darwin-arm64.zip"},
+		{Name: "cmdex-darwin-universal.zip"},
+	}
+	got = matchUpdaterAsset(updater.CheckRequest{Platform: "darwin", Arch: "arm64"}, archFirst)
+	if got != 0 {
+		t.Errorf("arch-first match = %d, want 0", got)
+	}
+}
+
 func TestUpdaterDisabledDevBuild(t *testing.T) {
 	old := appVersion
 	defer func() { appVersion = old }()
@@ -78,11 +101,13 @@ func TestUpdaterDisabledDevBuild(t *testing.T) {
 	if updaterDisabled() {
 		t.Error("updaterDisabled() = true for \"0.4.0\", want false")
 	}
-	// Tags carry a "v" prefix; release.yml strips it before stamping, so a
-	// stamped value must never retain it.
+	// Tags carry a "v" prefix; release.yml strips it before stamping. A
+	// v-prefixed value must still enable the updater (it is neither "" nor
+	// "dev") so a stamping slip fails loudly at the version comparison,
+	// not by silently disabling updates.
 	appVersion = "v0.4.0"
-	if !strings.HasPrefix(appVersion, "v") {
-		t.Error("test setup broken: expected v prefix")
+	if updaterDisabled() {
+		t.Error("updaterDisabled() = true for \"v0.4.0\", want false")
 	}
 }
 

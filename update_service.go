@@ -124,7 +124,9 @@ func initUpdater(app *application.App) {
 // matchUpdaterAsset picks the release asset for the running platform. On top
 // of the default platform+arch substring match it accepts a "universal" macOS
 // artifact (cmdex-darwin-universal.zip), which runs on both arm64 and amd64,
-// so the release pipeline doesn't need per-arch macOS zips.
+// so the release pipeline doesn't need per-arch macOS zips. Exact-arch hits
+// win over the universal fallback so a future per-arch asset isn't shadowed
+// by GitHub API asset order.
 func matchUpdaterAsset(req updater.CheckRequest, assets []github.ReleaseAsset) int {
 	platform, arch := strings.ToLower(req.Platform), strings.ToLower(req.Arch)
 	for i, a := range assets {
@@ -135,7 +137,19 @@ func matchUpdaterAsset(req updater.CheckRequest, assets []github.ReleaseAsset) i
 		if !strings.Contains(name, platform) {
 			continue
 		}
-		if strings.Contains(name, arch) || strings.Contains(name, "universal") {
+		if strings.Contains(name, arch) {
+			return i
+		}
+	}
+	for i, a := range assets {
+		name := strings.ToLower(a.Name)
+		if strings.HasSuffix(name, ".sig") {
+			continue
+		}
+		if !strings.Contains(name, platform) {
+			continue
+		}
+		if strings.Contains(name, "universal") {
 			return i
 		}
 	}
@@ -192,6 +206,11 @@ func runUpdateCheck() {
 		return
 	}
 	defer updateCheckMu.Unlock()
+	doUpdateCheck()
+}
+
+// doUpdateCheck runs the check body with updateCheckMu already held.
+func doUpdateCheck() {
 	pendingUpdateVersion = ""
 	rel, err := wailsApp.Updater.Check(context.Background())
 	recordUpdateCheckTime()
@@ -251,12 +270,19 @@ func (s *UpdateService) UpdatesEnabled() bool {
 // CheckForUpdates kicks off a headless check (+ auto-download when a release
 // is found). It returns immediately; the About dialog renders progress from
 // the wails:updater:* events. Dev builds get an error instead of silent
-// nothing.
+// nothing. A check already in flight reports a busy error so the dialog can
+// stay in its checking state instead of hanging without events.
 func (s *UpdateService) CheckForUpdates() error {
 	if updaterDisabled() || wailsApp == nil {
 		return errors.New("updates are not available in dev builds")
 	}
-	go runUpdateCheck()
+	if !updateCheckMu.TryLock() {
+		return errors.New("update check already in progress")
+	}
+	go func() {
+		defer updateCheckMu.Unlock()
+		doUpdateCheck()
+	}()
 	return nil
 }
 

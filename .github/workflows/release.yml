@@ -149,10 +149,12 @@ jobs:
 
       - name: Package release build
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         run: task ${{ matrix.task }} APP_VERSION=${RELEASE_TAG#v}
 
       - name: Build updater assets
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         run: task updater-assets APP_VERSION=${RELEASE_TAG#v}
 
       - name: Build only for manual dispatch

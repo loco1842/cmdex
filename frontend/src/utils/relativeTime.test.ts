@@ -26,8 +26,8 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("2026-08-30T12:00:00Z", NOW)).toBe("5 days ago");
   });
 
-  it("falls back to a date for older stamps and ignores future ones", () => {
+  it("falls back to a date for older stamps and clamps future ones to just now", () => {
     expect(formatRelativeTime("2026-06-01T12:00:00Z", NOW)).not.toBe("");
-    expect(formatRelativeTime("2026-09-04T12:00:01Z", NOW)).toBe("");
+    expect(formatRelativeTime("2026-09-04T12:00:01Z", NOW)).toBe("just now");
   });
 });

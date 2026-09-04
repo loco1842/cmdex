@@ -162,11 +162,21 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleCheck = useCallback(async () => {
-    setStatus({ kind: "checking" });
     try {
       await CheckForUpdates();
+      flowActiveRef.current = true;
+      setStatus({ kind: "checking" });
     } catch (err) {
-      setStatus({ kind: "error", message: String(err) });
+      const message = String(err);
+      // A background tick or menu trigger already owns the check; its
+      // wails:updater:* events will drive the status line.
+      if (message.includes("already in progress")) {
+        flowActiveRef.current = true;
+        setStatus({ kind: "checking" });
+        return;
+      }
+      flowActiveRef.current = false;
+      setStatus({ kind: "error", message });
     }
   }, []);
 
@@ -198,13 +208,23 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
 
   const openExternal = useCallback((url: string) => {
     try {
-      Browser.OpenURL(url);
+      void Promise.resolve(Browser.OpenURL(url)).catch(() => {
+        window.open(url, "_blank", "noopener");
+      });
     } catch {
       window.open(url, "_blank", "noopener");
     }
   }, []);
 
   const busy = status.kind === "checking" || status.kind === "downloading" || status.kind === "verifying" || status.kind === "installing";
+  const busyLabel =
+    status.kind === "downloading"
+      ? t("about.downloading")
+      : status.kind === "verifying"
+        ? t("about.verifying")
+        : status.kind === "installing"
+          ? t("about.installing")
+          : t("about.checking");
   const version = info?.version ?? "dev";
   const updatesEnabled = info?.updatesEnabled ?? false;
   const lastChecked = info?.lastCheck ? formatRelativeTime(info.lastCheck) : "";
@@ -278,7 +298,7 @@ export default function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                 disabled={!updatesEnabled || busy}
                 onClick={handleCheck}
               >
-                {busy ? t("about.checking") : t("about.checkForUpdates")}
+                {busy ? busyLabel : t("about.checkForUpdates")}
               </Button>
             )}
           </div>
