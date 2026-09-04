@@ -92,8 +92,15 @@ var updateChannelProvider *channelProvider
 // overlapping flows, so a trigger arriving while one is in flight is a no-op.
 var updateCheckMu sync.Mutex
 
+// pendingVersionMu guards pendingUpdateVersion. It is separate from
+// updateCheckMu on purpose: the check mutex stays locked for the whole
+// remote check + download, so GetAppInfo must not wait on it or the About
+// dialog would keep a null snapshot (rendered as a dev build) until the
+// flow finishes. This mutex is only ever held for a plain string copy.
+var pendingVersionMu sync.RWMutex
+
 // pendingUpdateVersion tracks the release found by the last check so the
-// About dialog can name it. Guarded by updateCheckMu.
+// About dialog can name it. Guarded by pendingVersionMu.
 var pendingUpdateVersion string
 
 // initUpdater configures app.Updater with the channel-aware GitHub provider.
@@ -211,7 +218,9 @@ func runUpdateCheck() {
 
 // doUpdateCheck runs the check body with updateCheckMu already held.
 func doUpdateCheck() {
+	pendingVersionMu.Lock()
 	pendingUpdateVersion = ""
+	pendingVersionMu.Unlock()
 	rel, err := wailsApp.Updater.Check(context.Background())
 	recordUpdateCheckTime()
 	if err != nil {
@@ -221,7 +230,9 @@ func doUpdateCheck() {
 	if rel == nil {
 		return
 	}
+	pendingVersionMu.Lock()
 	pendingUpdateVersion = rel.Version
+	pendingVersionMu.Unlock()
 	if err := wailsApp.Updater.DownloadAndInstall(context.Background()); err != nil {
 		wailsApp.Logger.Error("update download failed", "error", err)
 	}
@@ -327,9 +338,9 @@ func (s *UpdateService) GetAppInfo() AppInfo {
 	}
 	info.UpdatesEnabled = true
 	info.State = string(wailsApp.Updater.State())
-	updateCheckMu.Lock()
+	pendingVersionMu.RLock()
 	info.PendingVersion = pendingUpdateVersion
-	updateCheckMu.Unlock()
+	pendingVersionMu.RUnlock()
 	return info
 }
 

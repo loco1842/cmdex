@@ -2,7 +2,9 @@ package main
 
 import (
 	"testing"
+	"time"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
@@ -229,5 +231,51 @@ func TestGetAppInfoDevBuild(t *testing.T) {
 	}
 	if info.State != string(updater.StateUnconfigured) {
 		t.Errorf("State = %q, want unconfigured", info.State)
+	}
+}
+
+// stubUpdaterHost satisfies updater.Host (updater.New is documented for test
+// use) so GetAppInfo can run against a real Updater without an application.
+type stubUpdaterHost struct{}
+
+func (stubUpdaterHost) Emit(name string, data ...any) bool { return false }
+
+func (stubUpdaterHost) OnEvent(name string, callback func(payload any)) func() {
+	return func() {}
+}
+
+func (stubUpdaterHost) OpenWindow(opts updater.WindowOptions) updater.WindowHandle {
+	return nil
+}
+
+func (stubUpdaterHost) Quit() {}
+
+// TestGetAppInfoDoesNotBlockDuringCheck guards against the snapshot waiting
+// on updateCheckMu: with a check in flight (mutex held for the whole remote
+// check + download), About must still get its release-build snapshot instead
+// of hanging on a null one rendered as a dev build.
+func TestGetAppInfoDoesNotBlockDuringCheck(t *testing.T) {
+	oldVersion, oldDB, oldApp := appVersion, db, wailsApp
+	defer func() { appVersion, db, wailsApp = oldVersion, oldDB, oldApp }()
+
+	appVersion = "0.4.0"
+	db = nil
+	wailsApp = &application.App{Updater: updater.New(stubUpdaterHost{})}
+
+	updateCheckMu.Lock()
+	defer updateCheckMu.Unlock()
+
+	done := make(chan AppInfo, 1)
+	go func() { done <- (&UpdateService{}).GetAppInfo() }()
+	select {
+	case info := <-done:
+		if !info.UpdatesEnabled {
+			t.Error("UpdatesEnabled = false while a check is in flight, want true")
+		}
+		if info.Version != "0.4.0" {
+			t.Errorf("Version = %q while a check is in flight, want 0.4.0", info.Version)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetAppInfo blocked while a check held updateCheckMu")
 	}
 }
